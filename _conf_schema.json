@@ -8,7 +8,7 @@
   "task_limit": {
     "description": "每个账号的并发限制",
     "type": "int",
-    "default": "3",
+    "default": 3,
     "hint": "以前2，现在是3，以后可能会变"
   },
   "model": {
