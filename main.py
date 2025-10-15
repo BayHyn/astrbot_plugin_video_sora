@@ -33,6 +33,7 @@ class VideoSora(Star):
         self.speed_down_url = self.config.get("speed_down_url")
         self.polling_task = set()
         self.task_limit = self.config.get("task_limit", 3)
+        self.semaphores = {}  # 并发管理，每个 token 对应一个 Semaphore
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -60,6 +61,11 @@ class VideoSora(Star):
             )
         """)
         await self.conn.commit()
+
+    def get_semaphore(self, auth_token):
+        if auth_token not in self.semaphores:
+            self.semaphores[auth_token] = asyncio.Semaphore(self.task_limit)
+        return self.semaphores[auth_token]
 
     async def quote_task(
         self, event: AstrMessageEvent, task_id: str, authorization: str, is_check=False
@@ -270,10 +276,12 @@ class VideoSora(Star):
         elif self.screen_mode in ["横屏", "竖屏"]:
             screen_mode = "landscape" if self.screen_mode == "横屏" else "portrait"
         elif self.screen_mode == "自动" and image_bytes:
-            screen_mode = self.utils.get_image_orientation(image_bytes)
+            screen_mode = await asyncio.to_thread(
+                self.utils.get_image_orientation, image_bytes
+            )
 
         # 随机选择一个Authorization
-        valid_tokens = [k for k, v in self.auth_dict.items() if v < 2]
+        valid_tokens = [k for k, v in self.auth_dict.items() if v < self.task_limit]
         if not valid_tokens:
             yield event.chain_result(
                 [
@@ -318,13 +326,15 @@ class VideoSora(Star):
             )
             return
 
+        # 并发管理
+        semaphore = self.get_semaphore(auth_token)
+
         try:
-            # 记录并发
-            if self.auth_dict[auth_token] >= self.task_limit:
-                self.auth_dict[auth_token] = self.task_limit
-                logger.warning(f"Token {auth_token[-4:]} 并发数已达上限，但仍尝试使用")
-            else:
-                self.auth_dict[auth_token] += 1
+            # 记录任务信号
+            await semaphore.acquire()
+            logger.debug(
+                f"Token {auth_token[-4:]} 已获取许可，当前并发数: {self.task_limit - semaphore._value}/{self.task_limit}"
+            )
 
             # 剩下的任务交给quote_task处理
             video_url, msg = await self.quote_task(event, task_id, authorization)
@@ -339,11 +349,11 @@ class VideoSora(Star):
             yield event.chain_result([Video.fromURL(url=video_url)])
 
         finally:
-            if self.auth_dict[auth_token] <= 0:
-                self.auth_dict[auth_token] = 0
-                logger.warning(f"Token {auth_token[-4:]} 并发数计算错误，已重置为0")
-            else:
-                self.auth_dict[auth_token] -= 1
+            # 释放信号量
+            semaphore.release()
+            logger.debug(
+                f"Token {auth_token[-4:]} 释放许可，当前并发数: {self.task_limit - semaphore._value}/{self.task_limit}"
+            )
 
     @filter.command("sora查询")
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):

@@ -54,10 +54,12 @@ class Utils:
             requests.exceptions.SSLError,
             requests.exceptions.CertificateVerifyError,
         ):
+            logger.error("下载图片失败: 图片链接的SSL证书验证失败")
+            return None, "下载图片失败：图片链接的SSL证书验证失败"
             # 关闭SSL验证
-            response = await self.session.get(url, verify=False)
-            content = await asyncio.to_thread(self._handle_image, response.content)
-            return content, None
+            # response = await self.session.get(url, verify=False)
+            # content = await asyncio.to_thread(self._handle_image, response.content)
+            # return content, None
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
             return None, "下载图片失败：网络请求超时，请检查网络连通性"
