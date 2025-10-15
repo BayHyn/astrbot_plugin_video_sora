@@ -230,7 +230,7 @@ class VideoSora(Star):
             return
         # 解析参数
         msg = re.match(
-            r"^(?:生成视频|视频生成|sora) (横屏|竖屏)?([\s\S]*)$",
+            r"^(?:生成视频|视频生成|sora)(?:\s+(横屏|竖屏)?([\s\S]*))?$",
             event.message_str,
         )
         # 提取提示词
