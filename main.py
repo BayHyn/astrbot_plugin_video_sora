@@ -32,7 +32,7 @@ class VideoSora(Star):
         self.speed_down_url_type = self.config.get("speed_down_url_type")
         self.speed_down_url = self.config.get("speed_down_url")
         self.polling_task = set()
-        self.task_limit = self.config.get("task_limit", 3)
+        self.task_limit = int(self.config.get("task_limit", 3))
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""

@@ -54,7 +54,7 @@
       "替换"
     ],
     "default": "拼接",
-    "hint": "拼接类似于 https://加速域名/+https://原始域名。替换类似于 https://videos.openai.com/... -> https://加速域名/...，直接替换掉原链域名"
+    "hint": "拼接类似于 https://加速域名/+https://原链域名。替换类似于 https://videos.openai.com/... -> https://加速域名/...，直接替换掉原链域名"
   },
   "speed_down_url": {
     "description": "下载视频的加速反代",
