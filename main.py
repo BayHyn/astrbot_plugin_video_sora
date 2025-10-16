@@ -9,6 +9,7 @@ from astrbot.api import logger
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.api.message_components import Video
+from astrbot.core.message.message_event_result import MessageChain
 from .utils import Utils
 
 
@@ -28,7 +29,7 @@ class VideoSora(Star):
         self.utils = Utils(sora_base_url, chatgpt_base_url, proxy, model)
         self.auth_dict = dict.fromkeys(self.config.get("authorization_list", []), 0)
         self.screen_mode = self.config.get("screen_mode", "自动")
-        self.def_prompt = self.config.get("default_prompt", "让图片画面动起来")
+        self.def_prompt = self.config.get("default_prompt", "生成一个多镜头视频")
         self.speed_down_url_type = self.config.get("speed_down_url_type")
         self.speed_down_url = self.config.get("speed_down_url")
         self.polling_task = set()
@@ -82,7 +83,7 @@ class VideoSora(Star):
                 return None, err
             if status != "Done":
                 await event.send(
-                    event.chain_result(
+                    MessageChain(
                         [
                             Comp.Reply(id=event.message_obj.message_id),
                             Comp.Plain(
@@ -270,7 +271,9 @@ class VideoSora(Star):
         elif self.screen_mode in ["横屏", "竖屏"]:
             screen_mode = "landscape" if self.screen_mode == "横屏" else "portrait"
         elif self.screen_mode == "自动" and image_bytes:
-            screen_mode = await asyncio.to_thread(self.utils.get_image_orientation, image_bytes)
+            screen_mode = await asyncio.to_thread(
+                self.utils.get_image_orientation, image_bytes
+            )
 
         # 随机选择一个Authorization
         valid_tokens = [k for k, v in self.auth_dict.items() if v < self.task_limit]
@@ -407,6 +410,35 @@ class VideoSora(Star):
                 )
                 return
             yield event.chain_result([Video.fromURL(url=video_url)])
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("sora鉴权检测")
+    async def check_validity_check(self, event: AstrMessageEvent):
+        """检测鉴权有效性"""
+        yield event.chain_result(
+            [
+                Comp.Reply(id=event.message_obj.message_id),
+                Comp.Plain("正在检测，请稍等~"),
+            ]
+        )
+        result = "✅ 有效  ❌ 无效  ⏳ 超时  ❓ 错误\n"
+        for auth_token in self.auth_dict.keys():
+            authorization = "Bearer " + auth_token
+            is_valid = await self.utils.check_token_validity(authorization)
+            if is_valid == "Success":
+                result += f"✅ {auth_token[-8:]}\n"
+            elif is_valid == "Invalid":
+                result += f"❌ {auth_token[-8:]}\n"
+            elif is_valid == "Timeout":
+                result += f"⏳ {auth_token[-8:]}\n"
+            elif is_valid == "Error":
+                result += f"❓ {auth_token[-8:]}\n"
+        yield event.chain_result(
+            [
+                Comp.Reply(id=event.message_obj.message_id),
+                Comp.Plain(result),
+            ]
+        )
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""

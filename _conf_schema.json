@@ -20,7 +20,7 @@
   "default_prompt": {
     "description": "默认提示词",
     "type": "string",
-    "default": "生成一个多片段视频",
+    "default": "生成一个多镜头视频",
     "hint": ""
   },
   "screen_mode": {

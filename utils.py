@@ -292,5 +292,25 @@ class Utils:
             logger.error(f"获取视频链接失败: {e}")
             return "EXCEPTION", None, None, "获取视频链接失败"
 
+    async def check_token_validity(self, authorization: str) -> str:
+        try:
+            response = await self.session.get(
+                self.sora_base_url + "/backend/nf/pending",
+                headers={"Authorization": authorization},
+            )
+            if response.status_code == 200:
+                return "Success"
+            else:
+                result = response.json()
+                err_str = f"Token {authorization[-8:]} 无效: {result.get('error', {}).get('message')}"
+                logger.error(err_str)
+                return "Invalid"
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return "Timeout"
+        except Exception as e:
+            logger.error(f"程序错误: {e}")
+            return "Error"
+
     async def close(self):
         await self.session.close()

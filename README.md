@@ -19,6 +19,10 @@
 - sora查询 <task_id>  
 可用来查询任务状态、重放已生成的视频或重试未完成的任务。总之一个命令全搞定。
 
+检测鉴权有效性：
+- sora鉴权检测  
+仅管理员可用，一键检查鉴权是否有效。
+
 ## 并发控制与错误提示
 - 每个 token（Authorization）最多并发 2 个任务；无可用 token 时会提示并发过多或未配置。
 - 插件会在数据库（video_data.db）记录任务状态，包含 task_id、prompt、image_url、status、video_url、error_msg 等信息，方便后续查询与排查。
