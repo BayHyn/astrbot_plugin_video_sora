@@ -211,7 +211,7 @@ class Utils:
                 return "Failed", err_str, 0
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
-            return None, "视频状态查询失败：网络请求超时，请检查网络连通性"
+            return None, "视频状态查询失败：网络请求超时，请检查网络连通性", 0
         except Exception as e:
             logger.error(f"视频状态查询失败: {e}")
             return "EXCEPTION", "视频状态查询失败", 0
