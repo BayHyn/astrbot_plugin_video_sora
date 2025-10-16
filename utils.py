@@ -17,13 +17,13 @@ total_wait = 360  # 最多等待6分钟
 
 class Utils:
     def __init__(
-        self, sora_base_url: str, chatgpt_base_url: str, proxy: str, model: str
+        self, sora_base_url: str, chatgpt_base_url: str, proxy: str, model_config: object
     ):
         self.sora_base_url = sora_base_url
         self.chatgpt_base_url = chatgpt_base_url
         proxies = {"http": proxy, "https": proxy} if proxy else None
         self.session = AsyncSession(impersonate="chrome136", proxies=proxies)
-        self.model = model
+        self.model_config = model_config
         self.UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
 
     def _handle_image(self, image_bytes: bytes) -> bytes | None:
@@ -155,13 +155,13 @@ class Utils:
             "prompt": prompt,
             "title": None,
             "orientation": screen_mode,
-            "size": "small",
-            "n_frames": 300,
+            "size": self.model_config.get("size", "small"),
+            "n_frames": self.model_config.get("n_frames", 300),
             "inpaint_items": inpaint_items,
             "remix_target_id": None,
             "cameo_ids": None,
             "cameo_replacements": None,
-            "model": self.model,
+            "model": self.model_config.get("model", "sy_8"),
             "style_id": None,
             "audio_caption": None,
             "audio_transcript": None,

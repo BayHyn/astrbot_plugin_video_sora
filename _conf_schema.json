@@ -11,11 +11,30 @@
     "default": 3,
     "hint": "以前2，现在是3，以后可能会变"
   },
-  "model": {
-    "description": "模型代码",
-    "type": "string",
-    "default": "sy_8",
-    "hint": "目前已知可用的只有 sy_8"
+  "model_config": {
+    "description": "模型配置",
+    "type": "object",
+    "hint": "以下是应用于模型的配置参数，可用性可能随时发生变化",
+    "items": {
+      "model": {
+        "description": "模型代码",
+        "type": "string",
+        "default": "sy_8",
+        "hint": "目前已知可用的只有 sy_8"
+      },
+      "size": {
+        "description": "清晰度",
+        "type": "string",
+        "default": "small",
+        "hint": "已知可选的值有'small'、'large'，但是截至测试，只有'small'可用"
+      },
+      "n_frames": {
+        "description": "视频帧数",
+        "type": "int",
+        "default": 450,
+        "hint": "视频的总帧数，可输入范围可能会变化。由于视频默认30帧/秒，除非有办法修改每秒帧数，否则视频时长为 视频帧数/30 秒"
+      }
+    }
   },
   "default_prompt": {
     "description": "默认提示词",
