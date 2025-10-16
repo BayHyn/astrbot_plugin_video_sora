@@ -80,7 +80,7 @@ def generate_answer(seed, diff, config):
             return base_encode.decode(), True
 
     return "wQ8Lk5FbGpA2NcR9dShT6gYjU7VxZ4D" + pybase64.b64encode(
-        f'"{seed}"'.encode()
+        seed.encode()
     ).decode(), False
 
 

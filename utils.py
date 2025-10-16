@@ -10,9 +10,9 @@ from uuid import uuid4
 from .openai_sentinel.proof_of_work import get_pow_token
 
 # 轮询参数
-max_interval = 60  # 最大间隔
+max_interval = 90  # 最大间隔
 min_interval = 5  # 最小间隔
-total_wait = 360  # 最多等待6分钟
+total_wait = 600  # 最多等待10分钟
 
 
 class Utils:
@@ -48,18 +48,16 @@ class Utils:
     async def download_image(self, url: str) -> tuple[bytes | None, str | None]:
         try:
             response = await self.session.get(url)
-            content = await asyncio.to_thread(self._handle_image, response.content)
+            content = self._handle_image(response.content)
             return content, None
         except (
             requests.exceptions.SSLError,
             requests.exceptions.CertificateVerifyError,
         ):
-            logger.error("下载图片失败: 图片链接的SSL证书验证失败")
-            return None, "下载图片失败：图片链接的SSL证书验证失败"
             # 关闭SSL验证
-            # response = await self.session.get(url, verify=False)
-            # content = await asyncio.to_thread(self._handle_image, response.content)
-            # return content, None
+            response = await self.session.get(url, verify=False)
+            content = self._handle_image(response.content)
+            return content, None
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
             return None, "下载图片失败：网络请求超时，请检查网络连通性"

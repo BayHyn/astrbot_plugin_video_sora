@@ -1,7 +1,7 @@
 import re
 import random
 import asyncio
-import aiosqlite
+import sqlite3
 import os
 import astrbot.api.message_components as Comp
 from datetime import datetime
@@ -41,9 +41,9 @@ class VideoSora(Star):
             StarTools.get_data_dir("astrbot_plugin_video_sora"), "video_data.db"
         )
         # 打开持久化连接
-        self.conn = await aiosqlite.connect(video_db_path)
-        self.cursor = await self.conn.cursor()
-        await self.cursor.execute("""
+        self.conn = sqlite3.connect(video_db_path)
+        self.cursor = self.conn.cursor()
+        self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS video_data (
                 task_id TEXT PRIMARY KEY NOT NULL,
                 user_id INTEGER,
@@ -60,7 +60,7 @@ class VideoSora(Star):
                 created_at DATETIME
             )
         """)
-        await self.conn.commit()
+        self.conn.commit()
 
     async def quote_task(
         self, event: AstrMessageEvent, task_id: str, authorization: str, is_check=False
@@ -92,13 +92,15 @@ class VideoSora(Star):
                         ]
                     )
                 )
+            else:
+                logger.debug("队列状态完成，正在查询视频直链...")
         self.polling_task.add(task_id)
         try:
             # 等待视频生成
             result, err = await self.utils.poll_pending_video(task_id, authorization)
 
             # 更新任务进度
-            await self.cursor.execute(
+            self.cursor.execute(
                 """
                 UPDATE video_data SET status = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
             """,
@@ -109,7 +111,7 @@ class VideoSora(Star):
                     task_id,
                 ),  # "Done"表示任务队列状态结束，至于任务是否完成，不知道
             )
-            await self.conn.commit()
+            self.conn.commit()
 
             if result != "Done" or err:
                 return None, err
@@ -139,7 +141,7 @@ class VideoSora(Star):
                 logger.error(err)
 
             # 更新任务进度
-            await self.cursor.execute(
+            self.cursor.execute(
                 """
                 UPDATE video_data SET status = ?, video_url = ?, generation_id = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
             """,
@@ -152,7 +154,7 @@ class VideoSora(Star):
                     task_id,
                 ),
             )
-            await self.conn.commit()
+            self.conn.commit()
 
             if not video_url or err:
                 return None, err or "生成视频超时"
@@ -195,7 +197,7 @@ class VideoSora(Star):
 
         # 记录任务数据
         datetime_now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        await self.cursor.execute(
+        self.cursor.execute(
             """
             INSERT INTO video_data (task_id, user_id, nickname, prompt, image_url, status, message_id, auth_xor, updated_at, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -213,7 +215,7 @@ class VideoSora(Star):
                 datetime_now,
             ),
         )
-        await self.conn.commit()
+        self.conn.commit()
         # 返回结果
         return task_id, None
 
@@ -271,9 +273,7 @@ class VideoSora(Star):
         elif self.screen_mode in ["横屏", "竖屏"]:
             screen_mode = "landscape" if self.screen_mode == "横屏" else "portrait"
         elif self.screen_mode == "自动" and image_bytes:
-            screen_mode = await asyncio.to_thread(
-                self.utils.get_image_orientation, image_bytes
-            )
+            screen_mode = self.utils.get_image_orientation(image_bytes)
 
         # 随机选择一个Authorization
         valid_tokens = [k for k, v in self.auth_dict.items() if v < self.task_limit]
@@ -351,11 +351,11 @@ class VideoSora(Star):
     @filter.command("sora查询")
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):
         """重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务"""
-        await self.cursor.execute(
+        self.cursor.execute(
             "SELECT status, video_url, error_msg, auth_xor FROM video_data WHERE task_id = ?",
             (task_id,),
         )
-        row = await self.cursor.fetchone()
+        row = self.cursor.fetchone()
         if not row:
             yield event.chain_result(
                 [
@@ -414,11 +414,11 @@ class VideoSora(Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")
     async def check_validity_check(self, event: AstrMessageEvent):
-        """检测鉴权有效性"""
+        """测试鉴权有效性"""
         yield event.chain_result(
             [
                 Comp.Reply(id=event.message_obj.message_id),
-                Comp.Plain("正在检测，请稍等~"),
+                Comp.Plain("正在测试鉴权有效性，请稍等~"),
             ]
         )
         result = "✅ 有效  ❌ 无效  ⏳ 超时  ❓ 错误\n"
@@ -443,6 +443,6 @@ class VideoSora(Star):
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
         await self.utils.close()
-        await self.conn.commit()
-        await self.cursor.close()
-        await self.conn.close()
+        self.conn.commit()
+        self.cursor.close()
+        self.conn.close()

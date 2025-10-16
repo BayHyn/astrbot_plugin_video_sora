@@ -32,6 +32,7 @@
 
 ## 风险提示
 - 本插件基于网页逆向的方式调用官方接口，存在封号风险，请谨慎使用。
+- 如果使用反向代理，请确保反向代理的来源可信，以保证账号安全。
 
 ## 致谢
 - 感谢 [leetanshaj/openai-sentinel](https://github.com/leetanshaj/openai-sentinel) 公开 PoW 算法。（Thanks [leetanshaj/openai-sentinel](https://github.com/leetanshaj/openai-sentinel) for the PoW algorithm.）

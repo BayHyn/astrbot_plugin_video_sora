@@ -9,7 +9,7 @@
     "description": "每个账号的并发限制",
     "type": "int",
     "default": 3,
-    "hint": "以前2，现在是3，以后可能会变"
+    "hint": "一开始测试是2，最近测试是3，以后可能会变"
   },
   "model_config": {
     "description": "模型配置",
