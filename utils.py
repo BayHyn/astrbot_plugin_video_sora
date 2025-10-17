@@ -1,13 +1,14 @@
 import time
 import asyncio
 import json
+import hashlib
+import base64
 from PIL import Image
 from io import BytesIO
 from curl_cffi import requests, AsyncSession, CurlMime
 from curl_cffi.requests.exceptions import Timeout
 from astrbot.api import logger
 from uuid import uuid4
-from .openai_sentinel.proof_of_work import get_pow_token
 
 # 轮询参数
 max_interval = 90  # 最大间隔
@@ -17,14 +18,14 @@ total_wait = 600  # 最多等待10分钟
 
 class Utils:
     def __init__(
-        self, sora_base_url: str, chatgpt_base_url: str, proxy: str, model_config: object
+        self, sora_base_url: str, chatgpt_base_url: str, proxy: str, model_config: dict
     ):
         self.sora_base_url = sora_base_url
         self.chatgpt_base_url = chatgpt_base_url
         proxies = {"http": proxy, "https": proxy} if proxy else None
         self.session = AsyncSession(impersonate="chrome136", proxies=proxies)
         self.model_config = model_config
-        self.UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
+        self.UA_bytes = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0".encode()
 
     def _handle_image(self, image_bytes: bytes) -> bytes | None:
         try:
@@ -84,7 +85,7 @@ class Utils:
             mp = CurlMime()
             mp.addpart(
                 name="file",
-                filename=f"{int(time.time() * 1000)}.png",
+                filename=f"{int(time.time())}.png",
                 content_type="image/png",
                 data=image_bytes,
             )
@@ -111,29 +112,30 @@ class Utils:
             mp.close()
 
     async def get_sentinel(self) -> tuple[str | None, str | None]:
-        pow_token = await asyncio.to_thread(get_pow_token, self.UA)
+        # 随便生成一个哈希值作为PoW证明，反正服务器也不验证，留空都可以
+        random_str = self.UA_bytes + str(int(time.time() * 1000)).encode()
+        stoken = base64.b64encode(hashlib.sha256(random_str).digest()).decode()
         id = str(uuid4())
         flow = "sora_2_create_task"
-        payload = {"flow": flow, "id": id, "p": pow_token}
+        payload = {"flow": flow, "id": id, "p": stoken}
         try:
             response = await self.session.post(
                 self.chatgpt_base_url + "/backend-api/sentinel/req", json=payload
             )
             if response.status_code == 200:
                 result = response.json()
-                # 组装Sentinel tokens
+                # 组装Sentinel token
                 sentinel_token = {
-                    "p": pow_token,
+                    "p": stoken,
                     "t": result.get("turnstile", {}).get("dx", ""),
-                    "c": result.get("token"),
+                    "c": result.get("token", ""),
                     "id": id,
                     "flow": flow,
                 }
                 return json.dumps(sentinel_token), None
             else:
-                err_str = "获取Sentinel tokens失败"
-                logger.error(f"{err_str}: {response.text}")
-                return None, err_str
+                logger.error(f"获取Sentinel tokens失败: {response.text}")
+                return None, "获取Sentinel tokens失败"
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
             return None, "获取Sentinel tokens失败：网络请求超时，请检查网络连通性"
@@ -211,7 +213,7 @@ class Utils:
                 return "Failed", err_str, 0
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
-            return None, "视频状态查询失败：网络请求超时，请检查网络连通性", 0
+            return "Timeout", "视频状态查询失败：网络请求超时，请检查网络连通性", 0
         except Exception as e:
             logger.error(f"视频状态查询失败: {e}")
             return "EXCEPTION", "视频状态查询失败", 0
@@ -222,18 +224,28 @@ class Utils:
         """轮询等待视频生成完成"""
         interval = max_interval
         elapsed = 0  # 已等待时间
+        timeout_num = 0  # 超时次数
         while elapsed < total_wait:
             status, err, progress = await self.pending_video(task_id, authorization)
             if status == "Done":
-                return "Done", None  # 任务不存在，视为完成
+                return (
+                    "Done",
+                    None,
+                )  # "Done"表示任务队列状态结束，至于任务是否成功，不知道
             elif status == "Failed":
-                logger.error("视频状态查询失败")
                 return (
                     "Failed",
                     f"视频状态查询失败，ID: {task_id}，进度: {progress * 100:.2f}%，错误: {err}",
                 )
+            elif status == "Timeout":
+                # 前面都过了，这里不太可能超时，但是处理一下吧
+                timeout_num += 1
+                if timeout_num > 3:
+                    return (
+                        "Timeout",
+                        f"视频状态查询失败，ID: {task_id}，进度: {progress * 100:.2f}%，网络连接超时",
+                    )
             elif status == "EXCEPTION":
-                logger.error("视频状态查询异常")
                 return (
                     "EXCEPTION",
                     f"视频状态查询异常，ID: {task_id}，进度: {progress * 100:.2f}%",
@@ -267,7 +279,11 @@ class Utils:
                     if item.get("task_id") == task_id:
                         downloadable_url = item.get("downloadable_url")
                         if not downloadable_url:
-                            err_str = item.get("reason_str") or item.get("error_reason") or "未知错误"
+                            err_str = (
+                                item.get("reason_str")
+                                or item.get("error_reason")
+                                or "未知错误"
+                            )
                             logger.error(
                                 f"视频链接为空, task_id: {task_id}, reason: {err_str}"
                             )
@@ -308,7 +324,7 @@ class Utils:
             return "Timeout"
         except Exception as e:
             logger.error(f"程序错误: {e}")
-            return "Error"
+            return "EXCEPTION"
 
     async def close(self):
         await self.session.close()

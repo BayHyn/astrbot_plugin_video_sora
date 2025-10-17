@@ -65,7 +65,7 @@ class VideoSora(Star):
     async def quote_task(
         self, event: AstrMessageEvent, task_id: str, authorization: str, is_check=False
     ) -> tuple[str | None, str | None]:
-        """完成视频生成并发送视频"""
+        """完成视频生成并返回视频链接或者错误信息"""
 
         # 检查是否已经有相同任务在处理
         if task_id in self.polling_task:
@@ -109,7 +109,7 @@ class VideoSora(Star):
                     err,
                     datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     task_id,
-                ),  # "Done"表示任务队列状态结束，至于任务是否完成，不知道
+                ),
             )
             self.conn.commit()
 
@@ -329,7 +329,7 @@ class VideoSora(Star):
             else:
                 self.auth_dict[auth_token] += 1
 
-            # 剩下的任务交给quote_task处理
+            # 交给quote_task处理，直到返回视频链接或者错误信息
             video_url, msg = await self.quote_task(event, task_id, authorization)
             if not video_url:
                 yield event.chain_result(
@@ -339,7 +339,16 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            yield event.chain_result([Video.fromURL(url=video_url)])
+            try:
+                yield event.chain_result([Video.fromURL(url=video_url)])
+            except Exception as e:
+                logger.error(f"发送视频失败: {e}")
+                yield event.chain_result(
+                    [
+                        Comp.Reply(id=event.message_obj.message_id),
+                        Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
+                    ]
+                )
 
         finally:
             if self.auth_dict[auth_token] <= 0:
@@ -396,7 +405,7 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            # 交给quote_task处理
+            # 交给quote_task处理，直到返回视频链接或者错误信息
             authorization = "Bearer " + auth_token
             video_url, msg = await self.quote_task(
                 event, task_id, authorization, is_check=True
@@ -409,7 +418,16 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            yield event.chain_result([Video.fromURL(url=video_url)])
+            try:
+                yield event.chain_result([Video.fromURL(url=video_url)])
+            except Exception as e:
+                logger.error(f"发送视频失败: {e}")
+                yield event.chain_result(
+                    [
+                        Comp.Reply(id=event.message_obj.message_id),
+                        Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
+                    ]
+                )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")
@@ -431,7 +449,7 @@ class VideoSora(Star):
                 result += f"❌ {auth_token[-8:]}\n"
             elif is_valid == "Timeout":
                 result += f"⏳ {auth_token[-8:]}\n"
-            elif is_valid == "Error":
+            elif is_valid == "EXCEPTION":
                 result += f"❓ {auth_token[-8:]}\n"
         yield event.chain_result(
             [

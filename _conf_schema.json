@@ -63,7 +63,7 @@
     "description": "chatgpt_base_url",
     "type": "string",
     "default": "https://chatgpt.com",
-    "hint": "用于获取Sentinel tokens以绕过反爬限制"
+    "hint": "用于获取Sentinel token以绕过反爬限制"
   },
   "speed_down_url_type": {
     "description": "下载视频的反代类型",
