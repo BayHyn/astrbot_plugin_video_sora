@@ -27,7 +27,7 @@ class Utils:
         self.model_config = model_config
         self.UA_bytes = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0".encode()
 
-    def _handle_image(self, image_bytes: bytes) -> bytes | None:
+    def _handle_image(self, image_bytes: bytes) -> bytes:
         try:
             with Image.open(BytesIO(image_bytes)) as img:
                 # 如果不是 GIF，直接返回原图
@@ -301,7 +301,7 @@ class Utils:
                 return "Failed", None, None, err_str
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
-            return None, None, None, "获取视频链接失败：网络请求超时，请检查网络连通性"
+            return "Timeout", None, None, "获取视频链接失败：网络请求超时，请检查网络连通性"
         except Exception as e:
             logger.error(f"获取视频链接失败: {e}")
             return "EXCEPTION", None, None, "获取视频链接失败"

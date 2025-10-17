@@ -81,6 +81,18 @@
     "default": "",
     "hint": "如上所述"
   },
+  "group_whitelist_enabled": {
+    "description": "启用群组白名单",
+    "type": "bool",
+    "default": false,
+    "hint": "启用后只有白名单群能够使用本插件"
+  },
+  "group_whitelist": {
+    "description": "群组SID白名单",
+    "type": "list",
+    "default": [],
+    "hint": "白名单群组sid列表，可在对应群内使用/sid获取"
+  },
   "proxy": {
     "description": "proxy",
     "type": "string",

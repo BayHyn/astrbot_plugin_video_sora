@@ -34,6 +34,8 @@ class VideoSora(Star):
         self.speed_down_url = self.config.get("speed_down_url")
         self.polling_task = set()
         self.task_limit = int(self.config.get("task_limit", 3))
+        self.group_whitelist_enabled = self.config.get("group_whitelist_enabled")
+        self.group_whitelist = self.config.get("group_whitelist")
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -135,6 +137,8 @@ class VideoSora(Star):
                     break
                 await asyncio.sleep(interval)
                 elapsed += interval
+
+            # 没有出错也没有直链，轮询超时了
             if not video_url and not err:
                 status = "Timeout"
                 err = "获取视频下载地址超时"
@@ -156,9 +160,11 @@ class VideoSora(Star):
             )
             self.conn.commit()
 
+            # 把错误信息返回给调用者
             if not video_url or err:
                 return None, err or "生成视频超时"
 
+            # 处理视频直链
             if self.speed_down_url:
                 if self.speed_down_url_type == "拼接":
                     video_url = self.speed_down_url + video_url
@@ -228,6 +234,15 @@ class VideoSora(Star):
                 [
                     Comp.Reply(id=event.message_obj.message_id),
                     Comp.Plain("请先在插件配置中添加Authorization"),
+                ]
+            )
+            return
+        # 检查群是否在白名单中
+        if self.group_whitelist_enabled and event.unified_msg_origin not in self.group_whitelist:
+            yield event.chain_result(
+                [
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.Plain("当前群不在白名单中，请联系管理员添加sid白名单"),
                 ]
             )
             return
@@ -360,6 +375,15 @@ class VideoSora(Star):
     @filter.command("sora查询")
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):
         """重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务"""
+        # 检查群是否在白名单中
+        if self.group_whitelist_enabled and event.unified_msg_origin not in self.group_whitelist:
+            yield event.chain_result(
+                [
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.Plain("当前群不在白名单中，请联系管理员添加sid白名单"),
+                ]
+            )
+            return
         self.cursor.execute(
             "SELECT status, video_url, error_msg, auth_xor FROM video_data WHERE task_id = ?",
             (task_id,),
