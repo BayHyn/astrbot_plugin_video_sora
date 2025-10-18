@@ -25,7 +25,7 @@ class Utils:
         proxies = {"http": proxy, "https": proxy} if proxy else None
         self.session = AsyncSession(impersonate="chrome136", proxies=proxies)
         self.model_config = model_config
-        self.UA_bytes = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0".encode()
+        self.UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
 
     def _handle_image(self, image_bytes: bytes) -> bytes:
         try:
@@ -113,9 +113,9 @@ class Utils:
 
     async def get_sentinel(self) -> tuple[str | None, str | None]:
         # 随便生成一个哈希值作为PoW证明，反正服务器也不验证，留空都可以
-        random_str = self.UA_bytes + str(int(time.time() * 1000)).encode()
-        stoken = base64.b64encode(hashlib.sha256(random_str).digest()).decode()
         id = str(uuid4())
+        random_str = (self.UA + id).encode()
+        stoken = base64.b64encode(hashlib.sha256(random_str).digest()).decode()
         flow = "sora_2_create_task"
         payload = {"flow": flow, "id": id, "p": stoken}
         try:
@@ -205,7 +205,7 @@ class Utils:
                 for item in result:
                     if item.get("id") == task_id:
                         return item.get("status"), None, item.get("progress_pct") or 0
-                return "Done", None, 0  # 任务不存在，视为完成
+                return "Done", None, 0  # "Done"表示任务队列状态结束，至于任务是否成功，不知道
             else:
                 result = response.json()
                 err_str = f"视频状态查询失败: {result.get('error', {}).get('message')}"
@@ -285,7 +285,7 @@ class Utils:
                                 or "未知错误"
                             )
                             logger.error(
-                                f"视频链接为空, task_id: {task_id}, reason: {err_str}"
+                                f"生成视频失败, task_id: {task_id}, sora_reason: {err_str}"
                             )
                             return (
                                 "Failed",
@@ -294,14 +294,19 @@ class Utils:
                                 err_str,
                             )
                         return "Done", downloadable_url, item.get("id"), None
-                return "EXCEPTION", None, None, "未找到对应的视频"
+                return "NotFound", None, None, "未找到对应的视频"
             else:
                 err_str = f"获取视频链接失败: {result.get('error', {}).get('message')}"
                 logger.error(err_str)
                 return "Failed", None, None, err_str
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
-            return "Timeout", None, None, "获取视频链接失败：网络请求超时，请检查网络连通性"
+            return (
+                "Timeout",
+                None,
+                None,
+                "获取视频链接失败：网络请求超时，请检查网络连通性",
+            )
         except Exception as e:
             logger.error(f"获取视频链接失败: {e}")
             return "EXCEPTION", None, None, "获取视频链接失败"

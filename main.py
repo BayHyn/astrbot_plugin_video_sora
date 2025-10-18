@@ -138,12 +138,6 @@ class VideoSora(Star):
                 await asyncio.sleep(interval)
                 elapsed += interval
 
-            # 没有出错也没有直链，轮询超时了
-            if not video_url and not err:
-                status = "Timeout"
-                err = "获取视频下载地址超时"
-                logger.error(err)
-
             # 更新任务进度
             self.cursor.execute(
                 """
@@ -238,7 +232,10 @@ class VideoSora(Star):
             )
             return
         # 检查群是否在白名单中
-        if self.group_whitelist_enabled and event.unified_msg_origin not in self.group_whitelist:
+        if (
+            self.group_whitelist_enabled
+            and event.unified_msg_origin not in self.group_whitelist
+        ):
             yield event.chain_result(
                 [
                     Comp.Reply(id=event.message_obj.message_id),
@@ -290,7 +287,7 @@ class VideoSora(Star):
         elif self.screen_mode == "自动" and image_bytes:
             screen_mode = self.utils.get_image_orientation(image_bytes)
 
-        # 随机选择一个Authorization
+        # 过滤出可用Authorization
         valid_tokens = [k for k, v in self.auth_dict.items() if v < self.task_limit]
         if not valid_tokens:
             yield event.chain_result(
@@ -308,7 +305,7 @@ class VideoSora(Star):
 
         # 打乱顺序，避免请求过于集中
         random.shuffle(valid_tokens)
-        # 尝试循环使用所有可用 token，
+        # 尝试循环使用所有可用 token
         for auth_token in valid_tokens:
             authorization = "Bearer " + auth_token
             # 调用创建视频的函数
@@ -326,7 +323,7 @@ class VideoSora(Star):
                 )
                 break
 
-        # 尝试完全部 token 仍然请求失败
+        # 尝试完所有 token 仍然请求失败
         if not task_id:
             yield event.chain_result(
                 [
@@ -376,7 +373,10 @@ class VideoSora(Star):
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):
         """重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务"""
         # 检查群是否在白名单中
-        if self.group_whitelist_enabled and event.unified_msg_origin not in self.group_whitelist:
+        if (
+            self.group_whitelist_enabled
+            and event.unified_msg_origin not in self.group_whitelist
+        ):
             yield event.chain_result(
                 [
                     Comp.Reply(id=event.message_obj.message_id),
@@ -411,10 +411,24 @@ class VideoSora(Star):
         if video_url:
             if self.speed_down_url:
                 video_url = self.speed_down_url + video_url
-            yield event.chain_result([Video.fromURL(url=video_url)])
+            try:
+                yield event.chain_result([Video.fromURL(url=video_url)])
+            except Exception as e:
+                logger.error(f"发送视频失败: {e}")
+                yield event.chain_result(
+                    [
+                        Comp.Reply(id=event.message_obj.message_id),
+                        Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
+                    ]
+                )
             return
         # 再次尝试完成视频生成
-        if status == "Queued" or status == "Timeout" or status == "EXCEPTION":
+        if (
+            status == "Queued"
+            or status == "Timeout"
+            or status == "EXCEPTION"
+            or status == "NotFound"
+        ):
             # 尝试匹配auth_token
             auth_token = None
             for token in self.auth_dict.keys():
