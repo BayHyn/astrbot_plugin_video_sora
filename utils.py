@@ -205,12 +205,16 @@ class Utils:
                 for item in result:
                     if item.get("id") == task_id:
                         return item.get("status"), None, item.get("progress_pct") or 0
-                return "Done", None, 0  # "Done"表示任务队列状态结束，至于任务是否成功，不知道
+                return (
+                    "Done",
+                    None,
+                    0,
+                )  # "Done"表示任务队列状态结束，至于任务是否成功，不知道
             else:
                 result = response.json()
                 err_str = f"视频状态查询失败: {result.get('error', {}).get('message')}"
                 logger.error(err_str)
-                return "Failed", err_str, 0
+                return "Failed", result.get("error", {}).get("message"), 0
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
             return "Timeout", "视频状态查询失败：网络请求超时，请检查网络连通性", 0
@@ -225,18 +229,20 @@ class Utils:
         interval = max_interval
         elapsed = 0  # 已等待时间
         timeout_num = 0  # 超时次数
+        failed_num = 0  # 失败次数
         while elapsed < total_wait:
             status, err, progress = await self.pending_video(task_id, authorization)
             if status == "Done":
-                return (
-                    "Done",
-                    None,
-                )  # "Done"表示任务队列状态结束，至于任务是否成功，不知道
+                # "Done"表示任务队列状态结束，至于任务是否成功，不知道
+                return "Done", None
             elif status == "Failed":
-                return (
-                    "Failed",
-                    f"视频状态查询失败，ID: {task_id}，进度: {progress * 100:.2f}%，错误: {err}",
-                )
+                # 这个错误通常不是审查截断引起的，可能是服务器问题，重试几次
+                failed_num += 1
+                if failed_num > 3:
+                    return (
+                        "Failed",
+                        f"视频状态查询失败，ID: {task_id}，进度: {progress * 100:.2f}%，错误: {err}",
+                    )
             elif status == "Timeout":
                 # 前面都过了，这里不太可能超时，但是处理一下吧
                 timeout_num += 1
@@ -246,9 +252,10 @@ class Utils:
                         f"视频状态查询失败，ID: {task_id}，进度: {progress * 100:.2f}%，网络连接超时",
                     )
             elif status == "EXCEPTION":
+                # 程序错误，直接返回
                 return (
                     "EXCEPTION",
-                    f"视频状态查询异常，ID: {task_id}，进度: {progress * 100:.2f}%",
+                    f"视频状态查询程序错误，ID: {task_id}，请前往控制台查看",
                 )
             # 等待当前轮询间隔
             wait_time = min(interval, total_wait - elapsed)

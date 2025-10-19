@@ -369,9 +369,9 @@ class VideoSora(Star):
             else:
                 self.auth_dict[auth_token] -= 1
 
-    @filter.command("sora查询")
+    @filter.command("sora查询", alias={"sora强制查询"})
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):
-        """重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务"""
+        """重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务。强制查询将绕过数据库缓存，调用接口重新查询任务情况"""
         # 检查群是否在白名单中
         if (
             self.group_whitelist_enabled
@@ -398,74 +398,72 @@ class VideoSora(Star):
             )
             return
         status, video_url, error_msg, auth_xor = row
-        # 先处理错误
-        if status == "Failed":
+        is_force_check = event.message_str.startswith("sora强制查询")
+        if not is_force_check:
+            # 先处理错误
+            if status == "Failed":
+                yield event.chain_result(
+                    [
+                        Comp.Reply(id=event.message_obj.message_id),
+                        Comp.Plain(error_msg or "视频生成失败"),
+                    ]
+                )
+                return
+            # 有视频，直接发送视频
+            if video_url:
+                if self.speed_down_url:
+                    video_url = self.speed_down_url + video_url
+                try:
+                    yield event.chain_result([Video.fromURL(url=video_url)])
+                except Exception as e:
+                    logger.error(f"发送视频失败: {e}")
+                    yield event.chain_result(
+                        [
+                            Comp.Reply(id=event.message_obj.message_id),
+                            Comp.Plain(
+                                "发送视频失败，可能链接已失效或者网络连通性问题"
+                            ),
+                        ]
+                    )
+                return
+        # 再次尝试完成视频生成
+        # 尝试匹配auth_token
+        auth_token = None
+        for token in self.auth_dict.keys():
+            if token.endswith(auth_xor):
+                auth_token = token
+                break
+        if not auth_token:
             yield event.chain_result(
                 [
                     Comp.Reply(id=event.message_obj.message_id),
-                    Comp.Plain(error_msg or "视频生成失败"),
+                    Comp.Plain("Token不存在，无法查询视频生成状态"),
                 ]
             )
             return
-        # 有视频，直接发送视频
-        if video_url:
-            if self.speed_down_url:
-                video_url = self.speed_down_url + video_url
-            try:
-                yield event.chain_result([Video.fromURL(url=video_url)])
-            except Exception as e:
-                logger.error(f"发送视频失败: {e}")
-                yield event.chain_result(
-                    [
-                        Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
-                    ]
-                )
-            return
-        # 再次尝试完成视频生成
-        if (
-            status == "Queued"
-            or status == "Timeout"
-            or status == "EXCEPTION"
-            or status == "NotFound"
-        ):
-            # 尝试匹配auth_token
-            auth_token = None
-            for token in self.auth_dict.keys():
-                if token.endswith(auth_xor):
-                    auth_token = token
-                    break
-            if not auth_token:
-                yield event.chain_result(
-                    [
-                        Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain("Token不存在，无法查询视频生成状态"),
-                    ]
-                )
-                return
-            # 交给quote_task处理，直到返回视频链接或者错误信息
-            authorization = "Bearer " + auth_token
-            video_url, msg = await self.quote_task(
-                event, task_id, authorization, is_check=True
+        # 交给quote_task处理，直到返回视频链接或者错误信息
+        authorization = "Bearer " + auth_token
+        video_url, msg = await self.quote_task(
+            event, task_id, authorization, is_check=True
+        )
+        if not video_url:
+            yield event.chain_result(
+                [
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.Plain(msg),
+                ]
             )
-            if not video_url:
-                yield event.chain_result(
-                    [
-                        Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain(msg),
-                    ]
-                )
-                return
-            try:
-                yield event.chain_result([Video.fromURL(url=video_url)])
-            except Exception as e:
-                logger.error(f"发送视频失败: {e}")
-                yield event.chain_result(
-                    [
-                        Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
-                    ]
-                )
+            return
+        try:
+            yield event.chain_result([Video.fromURL(url=video_url)])
+        except Exception as e:
+            logger.error(f"发送视频失败: {e}")
+            yield event.chain_result(
+                [
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
+                ]
+            )
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")
