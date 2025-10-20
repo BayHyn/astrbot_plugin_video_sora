@@ -85,7 +85,7 @@ class Utils:
             mp = CurlMime()
             mp.addpart(
                 name="file",
-                filename=f"{int(time.time())}.png",
+                filename=f"{int(time.time() * 1000)}.png",
                 content_type="image/png",
                 data=image_bytes,
             )

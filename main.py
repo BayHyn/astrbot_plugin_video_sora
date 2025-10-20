@@ -22,8 +22,12 @@ class VideoSora(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.config = config  # 读取配置文件
-        sora_base_url = self.config.get("sora_base_url", "https://sora.chatgpt.com")
-        chatgpt_base_url = self.config.get("chatgpt_base_url", "https://chatgpt.com")
+        sora_base_url = self.config.get(
+            "sora_base_url", "https://sora.chatgpt.com"
+        ).rstrip("/")
+        chatgpt_base_url = self.config.get(
+            "chatgpt_base_url", "https://chatgpt.com"
+        ).rstrip("/")
         proxy = self.config.get("proxy")
         model_config = self.config.get("model_config", {})
         self.utils = Utils(sora_base_url, chatgpt_base_url, proxy, model_config)
@@ -31,7 +35,7 @@ class VideoSora(Star):
         self.screen_mode = self.config.get("screen_mode", "自动")
         self.def_prompt = self.config.get("default_prompt", "生成一个多镜头视频")
         self.speed_down_url_type = self.config.get("speed_down_url_type")
-        self.speed_down_url = self.config.get("speed_down_url")
+        self.speed_down_url = self.config.get("speed_down_url").rstrip("/")
         self.polling_task = set()
         self.task_limit = int(self.config.get("task_limit", 3))
         self.group_whitelist_enabled = self.config.get("group_whitelist_enabled")
@@ -158,15 +162,6 @@ class VideoSora(Star):
             if not video_url or err:
                 return None, err or "生成视频超时"
 
-            # 处理视频直链
-            if self.speed_down_url:
-                if self.speed_down_url_type == "拼接":
-                    video_url = self.speed_down_url + video_url
-                elif self.speed_down_url_type == "替换":
-                    # 替换域名部分
-                    video_url = re.sub(
-                        r"^(https?://[^/]+)", self.speed_down_url.rstrip("/"), video_url
-                    )
             return video_url, None
         finally:
             self.polling_task.remove(task_id)
@@ -318,7 +313,7 @@ class VideoSora(Star):
                 yield event.chain_result(
                     [
                         Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain(f"视频正在生成，请稍等~\nID: {task_id}"),
+                        Comp.Plain(f"正在生成视频，请稍等~\nID: {task_id}"),
                     ]
                 )
                 break
@@ -351,16 +346,16 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            try:
-                yield event.chain_result([Video.fromURL(url=video_url)])
-            except Exception as e:
-                logger.error(f"发送视频失败: {e}")
-                yield event.chain_result(
-                    [
-                        Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
-                    ]
-                )
+            # 处理视频直链
+            if self.speed_down_url:
+                if self.speed_down_url_type == "拼接":
+                    video_url = self.speed_down_url + video_url
+                elif self.speed_down_url_type == "替换":
+                    # 替换域名部分
+                    video_url = re.sub(
+                        r"^(https?://[^/]+)", self.speed_down_url, video_url
+                    )
+            yield event.chain_result([Video.fromURL(url=video_url)])
 
         finally:
             if self.auth_dict[auth_token] <= 0:
@@ -411,20 +406,16 @@ class VideoSora(Star):
                 return
             # 有视频，直接发送视频
             if video_url:
+                # 处理视频直链
                 if self.speed_down_url:
-                    video_url = self.speed_down_url + video_url
-                try:
-                    yield event.chain_result([Video.fromURL(url=video_url)])
-                except Exception as e:
-                    logger.error(f"发送视频失败: {e}")
-                    yield event.chain_result(
-                        [
-                            Comp.Reply(id=event.message_obj.message_id),
-                            Comp.Plain(
-                                "发送视频失败，可能链接已失效或者网络连通性问题"
-                            ),
-                        ]
-                    )
+                    if self.speed_down_url_type == "拼接":
+                        video_url = self.speed_down_url + video_url
+                    elif self.speed_down_url_type == "替换":
+                        # 替换域名部分
+                        video_url = re.sub(
+                            r"^(https?://[^/]+)", self.speed_down_url, video_url
+                        )
+                yield event.chain_result([Video.fromURL(url=video_url)])
                 return
         # 再次尝试完成视频生成
         # 尝试匹配auth_token
@@ -454,16 +445,16 @@ class VideoSora(Star):
                 ]
             )
             return
-        try:
-            yield event.chain_result([Video.fromURL(url=video_url)])
-        except Exception as e:
-            logger.error(f"发送视频失败: {e}")
-            yield event.chain_result(
-                [
-                    Comp.Reply(id=event.message_obj.message_id),
-                    Comp.Plain("发送视频失败，可能链接已失效或者网络连通性问题"),
-                ]
-            )
+        # 处理视频直链
+        if self.speed_down_url:
+            if self.speed_down_url_type == "拼接":
+                video_url = self.speed_down_url + video_url
+            elif self.speed_down_url_type == "替换":
+                # 替换域名部分
+                video_url = re.sub(
+                    r"^(https?://[^/]+)", self.speed_down_url, video_url
+                )
+        yield event.chain_result([Video.fromURL(url=video_url)])
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")
@@ -472,7 +463,7 @@ class VideoSora(Star):
         yield event.chain_result(
             [
                 Comp.Reply(id=event.message_obj.message_id),
-                Comp.Plain("正在测试鉴权有效性，请稍等~"),
+                Comp.Plain("正在测试鉴权有效性，请稍候~"),
             ]
         )
         result = "✅ 有效  ❌ 无效  ⏳ 超时  ❓ 错误\n"
