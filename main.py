@@ -24,10 +24,10 @@ class VideoSora(Star):
         self.config = config  # 读取配置文件
         sora_base_url = self.config.get(
             "sora_base_url", "https://sora.chatgpt.com"
-        ).rstrip("/")
+        )
         chatgpt_base_url = self.config.get(
             "chatgpt_base_url", "https://chatgpt.com"
-        ).rstrip("/")
+        )
         proxy = self.config.get("proxy")
         model_config = self.config.get("model_config", {})
         self.utils = Utils(sora_base_url, chatgpt_base_url, proxy, model_config)
@@ -35,7 +35,7 @@ class VideoSora(Star):
         self.screen_mode = self.config.get("screen_mode", "自动")
         self.def_prompt = self.config.get("default_prompt", "生成一个多镜头视频")
         self.speed_down_url_type = self.config.get("speed_down_url_type")
-        self.speed_down_url = self.config.get("speed_down_url").rstrip("/")
+        self.speed_down_url = self.config.get("speed_down_url")
         self.polling_task = set()
         self.task_limit = int(self.config.get("task_limit", 3))
         self.group_whitelist_enabled = self.config.get("group_whitelist_enabled")
