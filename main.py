@@ -17,17 +17,21 @@ from .utils import Utils
 max_wait = 30  # 最大等待时间（秒）
 interval = 3  # 每次轮询间隔（秒）
 
+# 屏幕映射方向
+screen_mapping = {
+    "横屏": "landscape",
+    "竖屏": "portrait",
+    "landscape": "landscape",
+    "portrait": "portrait",
+}
+
 
 class VideoSora(Star):
     def __init__(self, context: Context, config):
         super().__init__(context)
         self.config = config  # 读取配置文件
-        sora_base_url = self.config.get(
-            "sora_base_url", "https://sora.chatgpt.com"
-        )
-        chatgpt_base_url = self.config.get(
-            "chatgpt_base_url", "https://chatgpt.com"
-        )
+        sora_base_url = self.config.get("sora_base_url", "https://sora.chatgpt.com")
+        chatgpt_base_url = self.config.get("chatgpt_base_url", "https://chatgpt.com")
         proxy = self.config.get("proxy")
         model_config = self.config.get("model_config", {})
         self.utils = Utils(sora_base_url, chatgpt_base_url, proxy, model_config)
@@ -46,6 +50,10 @@ class VideoSora(Star):
         video_db_path = os.path.join(
             StarTools.get_data_dir("astrbot_plugin_video_sora"), "video_data.db"
         )
+        # 检查配置是否已经关闭函数工具
+        if not self.config.get("llm_tool_enabled", False):
+            StarTools.unregister_llm_tool("sora_video_generation")
+            logger.info("已删除函数调用工具: sora_video_generation")
         # 打开持久化连接
         self.conn = sqlite3.connect(video_db_path)
         self.cursor = self.conn.cursor()
@@ -68,7 +76,7 @@ class VideoSora(Star):
         """)
         self.conn.commit()
 
-    async def quote_task(
+    async def queue_task(
         self, event: AstrMessageEvent, task_id: str, authorization: str, is_check=False
     ) -> tuple[str | None, str | None]:
         """完成视频生成并返回视频链接或者错误信息"""
@@ -214,18 +222,27 @@ class VideoSora(Star):
         # 返回结果
         return task_id, None
 
+    @filter.llm_tool(name="sora_video_generation")
     @filter.command("sora", alias={"生成视频", "视频生成"})
-    async def video_sora(self, event: AstrMessageEvent):
-        """使用sora模型生成视频"""
-        # 先检测AccessToken是否存在
-        if not self.auth_dict:
-            yield event.chain_result(
-                [
-                    Comp.Reply(id=event.message_obj.message_id),
-                    Comp.Plain("请先在插件配置中添加Authorization"),
-                ]
-            )
-            return
+    async def video_sora(
+        self,
+        event: AstrMessageEvent,
+        llm_prompt: str = "",
+        llm_screen: str = "",
+    ):
+        """
+        A video generation tool, supporting both text-to-video and image-to-video functionalities.
+        If the user requests image-to-video generation, you must first verify that the user's message
+        explicitly contains an actual image file or attachment. References like 'this one' or 'the above
+        image' that point to an image in text form are NOT acceptable.
+
+        Args:
+            llm_prompt(string): The video generation prompt. Refine it strictly to
+                match the user's intent.
+            llm_screen(string): The screen orientation for the video. Must be one of
+                "landscape" or "portrait". You may choose a suitable orientation if the user does not specify.
+        """
+
         # 检查群是否在白名单中
         if (
             self.group_whitelist_enabled
@@ -238,13 +255,26 @@ class VideoSora(Star):
                 ]
             )
             return
+
+        # 检查AccessToken是否存在
+        if not self.auth_dict:
+            yield event.chain_result(
+                [
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.Plain("请先在插件配置中添加 Authorization"),
+                ]
+            )
+            return
+
         # 解析参数
         msg = re.match(
-            r"^(?:生成视频|视频生成|sora)(?:\s+(横屏|竖屏)?([\s\S]*))?$",
+            r"^(?:生成视频|视频生成|sora)(?:\s+(横屏|竖屏|landscape|portrait)?([\s\S]*))?$",
             event.message_str,
         )
         # 提取提示词
         prompt = msg.group(2).strip() if msg and msg.group(2) else self.def_prompt
+        if llm_prompt:
+            prompt = llm_prompt
 
         # 遍历消息链，获取第一张图片
         image_url = ""
@@ -274,7 +304,9 @@ class VideoSora(Star):
 
         # 竖屏还是横屏
         screen_mode = "portrait"
-        if msg.group(1):
+        if llm_screen in ["landscape", "portrait"]:
+            screen_mode = llm_screen
+        elif msg and msg.group(1):
             params = msg.group(1).strip()
             screen_mode = "landscape" if params == "横屏" else "portrait"
         elif self.screen_mode in ["横屏", "竖屏"]:
@@ -288,7 +320,7 @@ class VideoSora(Star):
             yield event.chain_result(
                 [
                     Comp.Reply(id=event.message_obj.message_id),
-                    Comp.Plain("当前并发数过多，请稍后再试"),
+                    Comp.Plain("当前并发数过多，请稍后再试~"),
                 ]
             )
             return
@@ -307,13 +339,15 @@ class VideoSora(Star):
             task_id, err = await self.create_video(
                 event, image_url, image_bytes, prompt, screen_mode, authorization
             )
+            # 释放内存
+            image_bytes = None
             # 如果成功拿到 task_id，则跳出循环
             if task_id:
                 # 回复用户
                 yield event.chain_result(
                     [
                         Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain(f"正在生成视频，请稍等~\nID: {task_id}"),
+                        Comp.Plain(f"正在生成视频，请稍候~\nID: {task_id}"),
                     ]
                 )
                 break
@@ -336,13 +370,13 @@ class VideoSora(Star):
             else:
                 self.auth_dict[auth_token] += 1
 
-            # 交给quote_task处理，直到返回视频链接或者错误信息
-            video_url, msg = await self.quote_task(event, task_id, authorization)
+            # 交给queue_task处理，直到返回视频链接或者错误信息
+            video_url, err_msg = await self.queue_task(event, task_id, authorization)
             if not video_url:
                 yield event.chain_result(
                     [
                         Comp.Reply(id=event.message_obj.message_id),
-                        Comp.Plain(msg),
+                        Comp.Plain(err_msg),
                     ]
                 )
                 return
@@ -432,9 +466,9 @@ class VideoSora(Star):
                 ]
             )
             return
-        # 交给quote_task处理，直到返回视频链接或者错误信息
+        # 交给queue_task处理，直到返回视频链接或者错误信息
         authorization = "Bearer " + auth_token
-        video_url, msg = await self.quote_task(
+        video_url, msg = await self.queue_task(
             event, task_id, authorization, is_check=True
         )
         if not video_url:
@@ -451,9 +485,7 @@ class VideoSora(Star):
                 video_url = self.speed_down_url + video_url
             elif self.speed_down_url_type == "替换":
                 # 替换域名部分
-                video_url = re.sub(
-                    r"^(https?://[^/]+)", self.speed_down_url, video_url
-                )
+                video_url = re.sub(r"^(https?://[^/]+)", self.speed_down_url, video_url)
         yield event.chain_result([Video.fromURL(url=video_url)])
 
     @filter.permission_type(filter.PermissionType.ADMIN)

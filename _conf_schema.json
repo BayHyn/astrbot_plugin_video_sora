@@ -11,6 +11,12 @@
     "default": 3,
     "hint": "一开始测试是2，最近测试是3，以后可能会变"
   },
+  "llm_tool_enabled": {
+    "description": "启用函数工具",
+    "type": "bool",
+    "default": false,
+    "hint": "通过大语言模型调用函数工具生成视频，请在AstrBot面板的配置文件中将 工具调用超时时间 设置为600秒，否则生成时间不够。也可以考虑增加个主动任务，后续自动查询。"
+  },
   "model_config": {
     "description": "模型配置",
     "type": "object",
@@ -26,7 +32,7 @@
         "description": "清晰度",
         "type": "string",
         "default": "small",
-        "hint": "已知可选的值有'small'、'large'，但是截至测试，只有'small'可用"
+        "hint": "已知可选的值有'small'、'large'，但是截至最近测试，只有'small'可用"
       },
       "n_frames": {
         "description": "视频帧数",
@@ -79,7 +85,7 @@
     "description": "下载视频的加速反代",
     "type": "string",
     "default": "",
-    "hint": "如上所述"
+    "hint": "如上所述。如果是拼接，可能需要在结尾加斜杠（/）"
   },
   "group_whitelist_enabled": {
     "description": "启用群组白名单",

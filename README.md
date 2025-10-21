@@ -1,6 +1,9 @@
-# astrbot_plugin_video_sora
+## astrbot_plugin_video_sora
 
-基于 Sora2 的视频生成插件。支持通过文本和图片生成视频。
+![:访问量](https://count.getloli.com/@astrbot_plugin_video_sora?name=astrbot_plugin_video_sora&theme=random&padding=7&offset=0&align=center&scale=1&pixelated=1&darkmode=auto)
+
+## 介绍
+基于 Openai Sora 模型的视频生成插件，支持通过文本和图片生成视频。
 
 ## 获取网页鉴权（accessToken）
 1. 登录 https://chatgpt.com
@@ -18,7 +21,7 @@
 查询与重试：
 - /sora查询 <task_id>  
 - /sora强制查询 <task_id>  
-可用来查询任务状态、重放已生成的视频或重试未完成的任务。总之一个命令全搞定。强制查询可以绕过服务器缓存的任务状态，从官方接口重新查询任务情况。
+可用来查询任务状态、重放已生成的视频或重试未完成的任务。强制查询将绕过数据库缓存的任务状态，从官方接口重新查询任务情况。
 
 检测鉴权有效性：
 - /sora鉴权检测  
