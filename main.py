@@ -387,7 +387,7 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            # 处理视频直链
+            # 下载视频
             video_path, err_msg = await self.utils.download_video(video_url, task_id)
             if err_msg:
                 yield event.chain_result(
@@ -401,7 +401,6 @@ class VideoSora(Star):
             # 删除视频文件（如果未开启保存视频）
             if not self.save_video_enabled:
                 self.utils.delete_video(task_id)
-            return
 
         finally:
             if self.auth_dict[auth_token] <= 0:
@@ -516,7 +515,6 @@ class VideoSora(Star):
         # 删除视频文件（如果未开启保存视频）
         if not self.save_video_enabled:
             self.utils.delete_video(task_id)
-        return
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")
