@@ -17,14 +17,6 @@ from .utils import Utils
 max_wait = 30  # 最大等待时间（秒）
 interval = 3  # 每次轮询间隔（秒）
 
-# 屏幕映射方向
-screen_mapping = {
-    "横屏": "landscape",
-    "竖屏": "portrait",
-    "landscape": "landscape",
-    "portrait": "portrait",
-}
-
 
 class VideoSora(Star):
     def __init__(self, context: Context, config):
@@ -34,12 +26,24 @@ class VideoSora(Star):
         chatgpt_base_url = self.config.get("chatgpt_base_url", "https://chatgpt.com")
         proxy = self.config.get("proxy")
         model_config = self.config.get("model_config", {})
-        self.utils = Utils(sora_base_url, chatgpt_base_url, proxy, model_config)
+        speed_down_url_type = self.config.get("speed_down_url_type")
+        speed_down_url = self.config.get("speed_down_url")
+        self.save_video_enabled = self.config.get("save_video_enabled", False)
+        self.video_data_dir = os.path.join(
+            StarTools.get_data_dir("astrbot_plugin_video_sora"), "videos"
+        )
+        self.utils = Utils(
+            sora_base_url,
+            chatgpt_base_url,
+            proxy,
+            model_config,
+            speed_down_url_type,
+            speed_down_url,
+            self.video_data_dir,
+        )
         self.auth_dict = dict.fromkeys(self.config.get("authorization_list", []), 0)
         self.screen_mode = self.config.get("screen_mode", "自动")
         self.def_prompt = self.config.get("default_prompt", "生成一个多镜头视频")
-        self.speed_down_url_type = self.config.get("speed_down_url_type")
-        self.speed_down_url = self.config.get("speed_down_url")
         self.polling_task = set()
         self.task_limit = int(self.config.get("task_limit", 3))
         self.group_whitelist_enabled = self.config.get("group_whitelist_enabled")
@@ -47,13 +51,16 @@ class VideoSora(Star):
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
-        video_db_path = os.path.join(
-            StarTools.get_data_dir("astrbot_plugin_video_sora"), "video_data.db"
-        )
         # 检查配置是否已经关闭函数工具
         if not self.config.get("llm_tool_enabled", False):
             StarTools.unregister_llm_tool("sora_video_generation")
             logger.info("已删除函数调用工具: sora_video_generation")
+        # 创建视频缓存文件路径
+        os.makedirs(self.video_data_dir, exist_ok=True)
+        # 数据库文件路径
+        video_db_path = os.path.join(
+            StarTools.get_data_dir("astrbot_plugin_video_sora"), "video_data.db"
+        )
         # 打开持久化连接
         self.conn = sqlite3.connect(video_db_path)
         self.cursor = self.conn.cursor()
@@ -81,7 +88,7 @@ class VideoSora(Star):
     ) -> tuple[str | None, str | None]:
         """完成视频生成并返回视频链接或者错误信息"""
 
-        # 检查是否已经有相同任务在处理
+        # 检查是否已经有相同的任务在处理
         if task_id in self.polling_task:
             status, _, progress = await self.utils.pending_video(task_id, authorization)
             return (
@@ -232,9 +239,9 @@ class VideoSora(Star):
     ):
         """
         A video generation tool, supporting both text-to-video and image-to-video functionalities.
-        If the user requests image-to-video generation, you must first verify that the user's message
-        explicitly contains an actual image file or attachment. References like 'this one' or 'the above
-        image' that point to an image in text form are NOT acceptable.
+        If the user requests image-to-video generation, you must first verify that the user's
+        current message explicitly contains an actual image. References like 'this one' or 'the
+        above image' that point to an image in text form are not acceptable.
 
         Args:
             llm_prompt(string): The video generation prompt. Refine it strictly to
@@ -381,15 +388,20 @@ class VideoSora(Star):
                 )
                 return
             # 处理视频直链
-            if self.speed_down_url:
-                if self.speed_down_url_type == "拼接":
-                    video_url = self.speed_down_url + video_url
-                elif self.speed_down_url_type == "替换":
-                    # 替换域名部分
-                    video_url = re.sub(
-                        r"^(https?://[^/]+)", self.speed_down_url, video_url
-                    )
-            yield event.chain_result([Video.fromURL(url=video_url)])
+            video_path, err_msg = await self.utils.download_video(video_url, task_id)
+            if err_msg:
+                yield event.chain_result(
+                    [
+                        Comp.Reply(id=event.message_obj.message_id),
+                        Comp.Plain(err_msg),
+                    ]
+                )
+                return
+            yield event.chain_result([Video.fromFileSystem(video_path)])
+            # 删除视频文件（如果未开启保存视频）
+            if not self.save_video_enabled:
+                self.utils.delete_video(task_id)
+            return
 
         finally:
             if self.auth_dict[auth_token] <= 0:
@@ -400,7 +412,10 @@ class VideoSora(Star):
 
     @filter.command("sora查询", alias={"sora强制查询"})
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):
-        """重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务。强制查询将绕过数据库缓存，调用接口重新查询任务情况"""
+        """
+        重放过去生成的视频，或者查询视频生成状态以及重试未完成的生成任务。
+        强制查询将绕过数据库缓存，调用接口重新查询任务情况
+        """
         # 检查群是否在白名单中
         if (
             self.group_whitelist_enabled
@@ -440,16 +455,24 @@ class VideoSora(Star):
                 return
             # 有视频，直接发送视频
             if video_url:
-                # 处理视频直链
-                if self.speed_down_url:
-                    if self.speed_down_url_type == "拼接":
-                        video_url = self.speed_down_url + video_url
-                    elif self.speed_down_url_type == "替换":
-                        # 替换域名部分
-                        video_url = re.sub(
-                            r"^(https?://[^/]+)", self.speed_down_url, video_url
+                video_path = os.path.join(self.video_data_dir, f"{task_id}.mp4")
+                # 先检查本地文件是否有视频文件
+                if not os.path.exists(video_path):
+                    video_path, err_msg = await self.utils.download_video(
+                        video_url, task_id
+                    )
+                    if err_msg:
+                        yield event.chain_result(
+                            [
+                                Comp.Reply(id=event.message_obj.message_id),
+                                Comp.Plain(err_msg),
+                            ]
                         )
-                yield event.chain_result([Video.fromURL(url=video_url)])
+                        return
+                yield event.chain_result([Video.fromFileSystem(video_path)])
+                # 删除视频文件（如果未开启保存视频）
+                if not self.save_video_enabled:
+                    self.utils.delete_video(task_id)
                 return
         # 再次尝试完成视频生成
         # 尝试匹配auth_token
@@ -479,14 +502,21 @@ class VideoSora(Star):
                 ]
             )
             return
-        # 处理视频直链
-        if self.speed_down_url:
-            if self.speed_down_url_type == "拼接":
-                video_url = self.speed_down_url + video_url
-            elif self.speed_down_url_type == "替换":
-                # 替换域名部分
-                video_url = re.sub(r"^(https?://[^/]+)", self.speed_down_url, video_url)
-        yield event.chain_result([Video.fromURL(url=video_url)])
+        # 下载视频
+        video_path, err_msg = await self.utils.download_video(video_url, task_id)
+        if err_msg:
+            yield event.chain_result(
+                [
+                    Comp.Reply(id=event.message_obj.message_id),
+                    Comp.Plain(err_msg),
+                ]
+            )
+            return
+        yield event.chain_result([Video.fromFileSystem(video_path)])
+        # 删除视频文件（如果未开启保存视频）
+        if not self.save_video_enabled:
+            self.utils.delete_video(task_id)
+        return
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")

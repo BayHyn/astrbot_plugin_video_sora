@@ -3,6 +3,8 @@ import asyncio
 import json
 import hashlib
 import base64
+import os
+import re
 from PIL import Image
 from io import BytesIO
 from curl_cffi import requests, AsyncSession, CurlMime
@@ -18,7 +20,14 @@ total_wait = 600  # 最多等待10分钟
 
 class Utils:
     def __init__(
-        self, sora_base_url: str, chatgpt_base_url: str, proxy: str, model_config: dict
+        self,
+        sora_base_url: str,
+        chatgpt_base_url: str,
+        proxy: str,
+        model_config: dict,
+        speed_down_url_type: str,
+        speed_down_url: str,
+        video_data_dir: str,
     ):
         self.sora_base_url = sora_base_url
         self.chatgpt_base_url = chatgpt_base_url
@@ -26,6 +35,9 @@ class Utils:
         self.session = AsyncSession(impersonate="chrome136", proxies=proxies)
         self.model_config = model_config
         self.UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
+        self.speed_down_url_type = speed_down_url_type
+        self.speed_down_url = speed_down_url
+        self.video_data_dir = video_data_dir
 
     def _handle_image(self, image_bytes: bytes) -> bytes:
         try:
@@ -317,6 +329,48 @@ class Utils:
         except Exception as e:
             logger.error(f"获取视频链接失败: {e}")
             return "EXCEPTION", None, None, "获取视频链接失败"
+
+    async def download_video(
+        self, video_url: str, task_id: str
+    ) -> tuple[str | None, str | None]:
+        try:
+            # 处理视频直链
+            if self.speed_down_url:
+                if self.speed_down_url_type == "拼接":
+                    video_url = self.speed_down_url + video_url
+                elif self.speed_down_url_type == "替换":
+                    # 替换域名部分
+                    video_url = re.sub(
+                        r"^(https?://[^/]+)", self.speed_down_url, video_url
+                    )
+            logger.debug(f"正在下载视频: {video_url}")
+            response = await self.session.get(video_url)
+            if response.status_code == 200:
+                # 保存视频内容到本地文件
+                video_path = os.path.join(self.video_data_dir, f"{task_id}.mp4")
+                with open(video_path, "wb") as f:
+                    f.write(response.content)
+                return video_path, None
+            else:
+                return None, f"下载视频失败: {response.status_code}"
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return None, "下载视频失败：网络请求超时，请检查网络连通性"
+        except Exception as e:
+            logger.error(f"下载视频失败: {e}")
+            return None, "下载视频失败"
+
+    def delete_video(self, task_id: str) -> None:
+        """删除视频文件，仅传递任务ID"""
+        try:
+            video_path = os.path.join(self.video_data_dir, f"{task_id}.mp4")
+            if os.path.exists(video_path):
+                os.remove(video_path)
+                logger.debug(f"已删除视频文件：{task_id}")
+            else:
+                logger.warning(f"视频文件不存在：{video_path}")
+        except Exception as e:
+            logger.error(f"删除视频失败: {e}")
 
     async def check_token_validity(self, authorization: str) -> str:
         try:
