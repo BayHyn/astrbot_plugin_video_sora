@@ -4,7 +4,6 @@ import json
 import hashlib
 import base64
 import os
-import re
 from PIL import Image
 from io import BytesIO
 from curl_cffi import requests, AsyncSession, CurlMime
@@ -13,9 +12,9 @@ from astrbot.api import logger
 from uuid import uuid4
 
 # 轮询参数
-max_interval = 90  # 最大间隔
-min_interval = 5  # 最小间隔
-total_wait = 600  # 最多等待10分钟
+MAX_INTERVAL = 90  # 最大间隔
+MIN_INTERVAL = 5  # 最小间隔
+TOTAL_WAIT = 600  # 最多等待10分钟
 
 
 class Utils:
@@ -25,8 +24,6 @@ class Utils:
         chatgpt_base_url: str,
         proxy: str,
         model_config: dict,
-        speed_down_url_type: str,
-        speed_down_url: str,
         video_data_dir: str,
     ):
         self.sora_base_url = sora_base_url
@@ -35,8 +32,6 @@ class Utils:
         self.session = AsyncSession(impersonate="chrome136", proxies=proxies)
         self.model_config = model_config
         self.UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
-        self.speed_down_url_type = speed_down_url_type
-        self.speed_down_url = speed_down_url
         self.video_data_dir = video_data_dir
 
     def _handle_image(self, image_bytes: bytes) -> bytes:
@@ -238,11 +233,11 @@ class Utils:
         self, task_id: str, authorization: str
     ) -> tuple[str, str | None]:
         """轮询等待视频生成完成"""
-        interval = max_interval
+        interval = MAX_INTERVAL
         elapsed = 0  # 已等待时间
         timeout_num = 0  # 超时次数
         failed_num = 0  # 失败次数
-        while elapsed < total_wait:
+        while elapsed < TOTAL_WAIT:
             status, err, progress = await self.pending_video(task_id, authorization)
             if status == "Done":
                 # "Done"表示任务队列状态结束，至于任务是否成功，不知道
@@ -270,11 +265,11 @@ class Utils:
                     f"视频状态查询程序错误，ID: {task_id}，请前往控制台查看",
                 )
             # 等待当前轮询间隔
-            wait_time = min(interval, total_wait - elapsed)
+            wait_time = min(interval, TOTAL_WAIT - elapsed)
             await asyncio.sleep(wait_time)
             elapsed += wait_time
             # 反向指数退避：间隔逐步减小
-            interval = max(min_interval, interval // 2)
+            interval = max(MIN_INTERVAL, interval // 2)
             logger.debug(
                 f"视频处理中，{interval}s 后再次请求... 进度: {progress * 100:.2f}%"
             )
@@ -334,15 +329,6 @@ class Utils:
         self, video_url: str, task_id: str
     ) -> tuple[str | None, str | None]:
         try:
-            # 处理视频直链
-            if self.speed_down_url:
-                if self.speed_down_url_type == "拼接":
-                    video_url = self.speed_down_url + video_url
-                elif self.speed_down_url_type == "替换":
-                    # 替换域名部分
-                    video_url = re.sub(
-                        r"^(https?://[^/]+)", self.speed_down_url, video_url
-                    )
             logger.debug(f"正在下载视频: {video_url}")
             response = await self.session.get(video_url)
             if response.status_code == 200:
@@ -368,7 +354,7 @@ class Utils:
                 os.remove(video_path)
                 logger.debug(f"已删除视频文件：{task_id}")
             else:
-                logger.warning(f"视频文件不存在：{video_path}")
+                logger.warning(f"删除视频失败: 视频文件不存在：{video_path}")
         except Exception as e:
             logger.error(f"删除视频失败: {e}")
 

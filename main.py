@@ -14,8 +14,8 @@ from .utils import Utils
 
 
 # 获取视频下载地址
-max_wait = 30  # 最大等待时间（秒）
-interval = 3  # 每次轮询间隔（秒）
+MAX_WAIT = 30  # 最大等待时间（秒）
+INTERVAL = 3  # 每次轮询间隔（秒）
 
 
 class VideoSora(Star):
@@ -24,10 +24,10 @@ class VideoSora(Star):
         self.config = config  # 读取配置文件
         sora_base_url = self.config.get("sora_base_url", "https://sora.chatgpt.com")
         chatgpt_base_url = self.config.get("chatgpt_base_url", "https://chatgpt.com")
-        proxy = self.config.get("proxy")
+        self.proxy = self.config.get("proxy")
         model_config = self.config.get("model_config", {})
-        speed_down_url_type = self.config.get("speed_down_url_type")
-        speed_down_url = self.config.get("speed_down_url")
+        self.speed_down_url_type = self.config.get("speed_down_url_type")
+        self.speed_down_url = self.config.get("speed_down_url")
         self.save_video_enabled = self.config.get("save_video_enabled", False)
         self.video_data_dir = os.path.join(
             StarTools.get_data_dir("astrbot_plugin_video_sora"), "videos"
@@ -35,10 +35,8 @@ class VideoSora(Star):
         self.utils = Utils(
             sora_base_url,
             chatgpt_base_url,
-            proxy,
+            self.proxy,
             model_config,
-            speed_down_url_type,
-            speed_down_url,
             self.video_data_dir,
         )
         self.auth_dict = dict.fromkeys(self.config.get("authorization_list", []), 0)
@@ -48,6 +46,7 @@ class VideoSora(Star):
         self.task_limit = int(self.config.get("task_limit", 3))
         self.group_whitelist_enabled = self.config.get("group_whitelist_enabled")
         self.group_whitelist = self.config.get("group_whitelist")
+        self.send_video_method = self.config.get("send_video_method", "文件")
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -115,71 +114,70 @@ class VideoSora(Star):
                 )
             else:
                 logger.debug("队列状态完成，正在查询视频直链...")
+
         self.polling_task.add(task_id)
-        try:
-            # 等待视频生成
-            result, err = await self.utils.poll_pending_video(task_id, authorization)
 
-            # 更新任务进度
-            self.cursor.execute(
-                """
-                UPDATE video_data SET status = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
-            """,
-                (
-                    result,
-                    err,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    task_id,
-                ),
+        # 等待视频生成
+        result, err = await self.utils.poll_pending_video(task_id, authorization)
+
+        # 更新任务进度
+        self.cursor.execute(
+            """
+            UPDATE video_data SET status = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
+        """,
+            (
+                result,
+                err,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                task_id,
+            ),
+        )
+        self.conn.commit()
+
+        if result != "Done" or err:
+            return None, err
+
+        elapsed = 0
+        status = "Done"
+        video_url = ""
+        generation_id = None
+        err = None
+        # 获取视频下载地址
+        while elapsed < MAX_WAIT:
+            (
+                status,
+                video_url,
+                generation_id,
+                err,
+            ) = await self.utils.fetch_video_url(
+                task_id, authorization, 30 if is_check else 15
             )
-            self.conn.commit()
+            if video_url or status == "Failed":
+                break
+            await asyncio.sleep(INTERVAL)
+            elapsed += INTERVAL
 
-            if result != "Done" or err:
-                return None, err
+        # 更新任务进度
+        self.cursor.execute(
+            """
+            UPDATE video_data SET status = ?, video_url = ?, generation_id = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
+        """,
+            (
+                status,
+                video_url,
+                generation_id,
+                err,
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                task_id,
+            ),
+        )
+        self.conn.commit()
 
-            elapsed = 0
-            status = "Done"
-            video_url = ""
-            generation_id = None
-            err = None
-            # 获取视频下载地址
-            while elapsed < max_wait:
-                (
-                    status,
-                    video_url,
-                    generation_id,
-                    err,
-                ) = await self.utils.fetch_video_url(
-                    task_id, authorization, 30 if is_check else 15
-                )
-                if video_url or status == "Failed":
-                    break
-                await asyncio.sleep(interval)
-                elapsed += interval
+        # 把错误信息返回给调用者
+        if not video_url or err:
+            return None, err or "生成视频超时"
 
-            # 更新任务进度
-            self.cursor.execute(
-                """
-                UPDATE video_data SET status = ?, video_url = ?, generation_id = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
-            """,
-                (
-                    status,
-                    video_url,
-                    generation_id,
-                    err,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    task_id,
-                ),
-            )
-            self.conn.commit()
-
-            # 把错误信息返回给调用者
-            if not video_url or err:
-                return None, err or "生成视频超时"
-
-            return video_url, None
-        finally:
-            self.polling_task.remove(task_id)
+        return video_url, None
 
     async def create_video(
         self,
@@ -228,6 +226,35 @@ class VideoSora(Star):
         self.conn.commit()
         # 返回结果
         return task_id, None
+
+    async def handle_video_comp(
+        self, task_id: str, video_url: str
+    ) -> tuple[Video | None, str | None]:
+        """处理视频组件消息"""
+        # 视频组件
+        video_comp = None
+        err_msg = None
+
+        # 处理反向代理
+        if self.speed_down_url_type == "拼接":
+            video_url = self.speed_down_url + video_url
+        elif self.speed_down_url_type == "替换":
+            video_url = re.sub(r"^(https?://[^/]+)", self.speed_down_url, video_url)
+        video_comp = Video.fromURL(video_url)
+
+        # 下载视频到本地
+        if self.send_video_method == "文件" or self.save_video_enabled:
+            video_path = os.path.join(self.video_data_dir, f"{task_id}.mp4")
+            # 先检查本地文件是否有视频文件
+            if not os.path.exists(video_path):
+                video_path, err_msg = await self.utils.download_video(
+                    video_url, task_id
+                )
+            if self.send_video_method == "文件":
+                if err_msg:
+                    return None, err_msg
+                video_comp = Video.fromFileSystem(video_path)
+        return video_comp, None
 
     @filter.llm_tool(name="sora_video_generation")
     @filter.command("sora", alias={"生成视频", "视频生成"})
@@ -283,7 +310,7 @@ class VideoSora(Star):
         if llm_prompt:
             prompt = llm_prompt
 
-        # 遍历消息链，获取第一张图片
+        # 遍历消息链，获取第一张图片（Sora端点不支持多张图片的视频生成，至少测试的时候是这样）
         image_url = ""
         for comp in event.get_messages():
             if isinstance(comp, Comp.Image):
@@ -346,10 +373,10 @@ class VideoSora(Star):
             task_id, err = await self.create_video(
                 event, image_url, image_bytes, prompt, screen_mode, authorization
             )
-            # 释放内存
-            image_bytes = None
             # 如果成功拿到 task_id，则跳出循环
             if task_id:
+                # 释放内存
+                image_bytes = None
                 # 回复用户
                 yield event.chain_result(
                     [
@@ -387,8 +414,9 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            # 下载视频
-            video_path, err_msg = await self.utils.download_video(video_url, task_id)
+
+            # 视频组件
+            video_comp, err_msg = await self.handle_video_comp(task_id, video_url)
             if err_msg:
                 yield event.chain_result(
                     [
@@ -397,10 +425,13 @@ class VideoSora(Star):
                     ]
                 )
                 return
-            yield event.chain_result([Video.fromFileSystem(video_path)])
-            # 删除视频文件（如果未开启保存视频）
-            if not self.save_video_enabled:
-                self.utils.delete_video(task_id)
+
+            # 发送处理后的视频
+            if video_comp:
+                yield event.chain_result([video_comp])
+                # 删除视频文件
+                if not self.save_video_enabled and self.send_video_method == "文件":
+                    self.utils.delete_video(task_id)
 
         finally:
             if self.auth_dict[auth_token] <= 0:
@@ -408,6 +439,8 @@ class VideoSora(Star):
                 logger.warning(f"Token {auth_token[-4:]} 并发数计算错误，已重置为0")
             else:
                 self.auth_dict[auth_token] -= 1
+            # 确保发送完成后再释放并发计数，防止下载视频或者发送视频过程中查询导致重复发送
+            self.polling_task.remove(task_id)
 
     @filter.command("sora查询", alias={"sora强制查询"})
     async def check_video_task(self, event: AstrMessageEvent, task_id: str):
@@ -454,25 +487,21 @@ class VideoSora(Star):
                 return
             # 有视频，直接发送视频
             if video_url:
-                video_path = os.path.join(self.video_data_dir, f"{task_id}.mp4")
-                # 先检查本地文件是否有视频文件
-                if not os.path.exists(video_path):
-                    video_path, err_msg = await self.utils.download_video(
-                        video_url, task_id
+                video_comp, err_msg = await self.handle_video_comp(task_id, video_url)
+                if err_msg:
+                    yield event.chain_result(
+                        [
+                            Comp.Reply(id=event.message_obj.message_id),
+                            Comp.Plain(err_msg),
+                        ]
                     )
-                    if err_msg:
-                        yield event.chain_result(
-                            [
-                                Comp.Reply(id=event.message_obj.message_id),
-                                Comp.Plain(err_msg),
-                            ]
-                        )
-                        return
-                yield event.chain_result([Video.fromFileSystem(video_path)])
-                # 删除视频文件（如果未开启保存视频）
-                if not self.save_video_enabled:
-                    self.utils.delete_video(task_id)
-                return
+                    return
+                if video_comp:
+                    yield event.chain_result([video_comp])
+                    # 删除视频文件
+                    if not self.save_video_enabled and self.send_video_method == "文件":
+                        self.utils.delete_video(task_id)
+                    return
         # 再次尝试完成视频生成
         # 尝试匹配auth_token
         auth_token = None
@@ -501,8 +530,9 @@ class VideoSora(Star):
                 ]
             )
             return
-        # 下载视频
-        video_path, err_msg = await self.utils.download_video(video_url, task_id)
+
+        # 视频组件
+        video_comp, err_msg = await self.handle_video_comp(task_id, video_url)
         if err_msg:
             yield event.chain_result(
                 [
@@ -511,10 +541,13 @@ class VideoSora(Star):
                 ]
             )
             return
-        yield event.chain_result([Video.fromFileSystem(video_path)])
-        # 删除视频文件（如果未开启保存视频）
-        if not self.save_video_enabled:
-            self.utils.delete_video(task_id)
+
+        # 发送处理后的视频
+        if video_comp:
+            yield event.chain_result([video_comp])
+            # 删除视频文件
+            if not self.save_video_enabled and self.send_video_method == "文件":
+                self.utils.delete_video(task_id)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("sora鉴权检测")
@@ -547,7 +580,13 @@ class VideoSora(Star):
 
     async def terminate(self):
         """可选择实现异步的插件销毁方法，当插件被卸载/停用时会调用。"""
-        await self.utils.close()
-        self.conn.commit()
-        self.cursor.close()
-        self.conn.close()
+        try:
+            await self.utils.close()
+            self.conn.commit()
+            self.cursor.close()
+            self.conn.close()
+            if self.config.get("llm_tool_enabled", False):
+                StarTools.unregister_llm_tool("sora_video_generation")
+                logger.info("已删除函数调用工具: sora_video_generation")
+        except Exception as e:
+            logger.error(f"插件卸载时发生错误: {e}")

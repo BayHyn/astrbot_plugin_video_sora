@@ -3,13 +3,13 @@
     "description": "authorization列表",
     "type": "list",
     "default": [],
-    "hint": "支持添加多个Token轮询使用。Token获取方式：登录 https://chatgpt.com 以后，进入 https://chatgpt.com/api/auth/session 复制 accessToken 字段的值填写进去即可，不要加 Bearer 前缀"
+    "hint": "支持添加多个Token轮询使用。Token获取方式：登录 https://chatgpt.com 以后，进入 https://chatgpt.com/api/auth/session 复制 accessToken 字段的值填写进去即可，不要加 Bearer 前缀。"
   },
   "task_limit": {
     "description": "每个账号的并发限制",
     "type": "int",
     "default": 3,
-    "hint": "一开始测试是2，最近测试是3，以后可能会变"
+    "hint": "一开始测试是2，最近测试是3，以后可能会变。"
   },
   "llm_tool_enabled": {
     "description": "启用函数工具",
@@ -20,25 +20,25 @@
   "model_config": {
     "description": "模型配置",
     "type": "object",
-    "hint": "以下是应用于模型的配置参数，可用性可能随时发生变化",
+    "hint": "以下是应用于模型的配置参数，可用性可能随时发生变化。",
     "items": {
       "model": {
         "description": "模型代码",
         "type": "string",
         "default": "sy_8",
-        "hint": "目前已知可用的只有 sy_8"
+        "hint": "目前已知可用的只有 sy_8。"
       },
       "size": {
         "description": "清晰度",
         "type": "string",
         "default": "small",
-        "hint": "已知可选的值有'small'、'large'，但是截至最近测试，只有'small'可用"
+        "hint": "已知可选的值有'small'、'large'，但是截至最近测试，只有'small'可用。"
       },
       "n_frames": {
         "description": "视频帧数",
         "type": "int",
         "default": 450,
-        "hint": "视频的总帧数，可输入范围可能会变化。由于视频默认30帧/秒，除非有办法修改每秒帧数，否则视频时长为 视频帧数/30 秒"
+        "hint": "视频的总帧数，可输入范围可能会变化。由于视频默认30帧/秒，除非有办法修改每秒帧数，否则视频时长为 视频帧数/30 秒。"
       }
     }
   },
@@ -57,19 +57,19 @@
       "横屏"
     ],
     "default": "自动",
-    "hint": "生成视频横屏还是竖屏，如果没有图片且为自动，默认竖屏"
+    "hint": "生成视频横屏还是竖屏，如果没有图片且为自动，默认竖屏。"
   },
   "sora_base_url": {
     "description": "sora_base_url",
     "type": "string",
     "default": "https://sora.chatgpt.com",
-    "hint": "用于发起任务请求，可使用反代绕过地域限制。不用于下载视频"
+    "hint": "用于发起任务请求，可使用反代绕过地域限制。不用于下载视频。"
   },
   "chatgpt_base_url": {
     "description": "chatgpt_base_url",
     "type": "string",
     "default": "https://chatgpt.com",
-    "hint": "用于获取Sentinel token以绕过反爬限制"
+    "hint": "用于获取Sentinel token以绕过反爬限制。"
   },
   "speed_down_url_type": {
     "description": "下载视频的反代类型",
@@ -79,36 +79,46 @@
       "替换"
     ],
     "default": "拼接",
-    "hint": "拼接类似于 https://加速域名/+https://原链域名。替换类似于 https://videos.openai.com/... -> https://加速域名/...，直接替换掉原链域名"
+    "hint": "拼接类似于 https://加速域名/+https://原链域名。替换类似于 https://videos.openai.com/... -> https://加速域名/...，直接替换掉原链域名。"
   },
   "speed_down_url": {
-    "description": "下载视频的加速反代",
+    "description": "下载视频的反向代理",
     "type": "string",
     "default": "",
-    "hint": "如上所述。如果是拼接，可能需要在结尾加斜杠（/）"
+    "hint": "如上所述。如果是拼接，可能需要在结尾加斜杠（/）。"
+  },
+  "send_video_method": {
+    "description": "发送视频方式",
+    "type": "string",
+    "options": [
+      "URL",
+      "文件"
+    ],
+    "default": "文件",
+    "hint": "选择URL可能导致发送视频的时候HTTP代理不起效果。选择文件可能由于AstrBot和协议端不在同一个文件系统导致协议端找不到文件。详见README.md 发送视频失败的解决方案 部分。"
   },
   "save_video_enabled": {
     "description": "启用视频保存",
     "type": "bool",
     "default": false,
-    "hint": "是否持久化保存下载的视频文件。如果关闭，将会在发送视频后尝试删除文件，删除失败将在控制台打印错误信息。视频文件保存在插件数据目录下"
+    "hint": "是否持久化保存下载的视频文件。如果关闭，将会在发送视频后尝试删除文件，删除失败将在控制台打印错误信息。视频文件保存在插件数据目录下。"
   },
   "group_whitelist_enabled": {
     "description": "启用群组白名单",
     "type": "bool",
     "default": false,
-    "hint": "启用后只有白名单群能够使用本插件"
+    "hint": "启用后只有白名单群能够使用本插件。"
   },
   "group_whitelist": {
     "description": "群组SID白名单",
     "type": "list",
     "default": [],
-    "hint": "白名单群组sid列表，可在对应群内使用/sid获取"
+    "hint": "白名单群组sid列表，可在对应群内使用/sid获取。"
   },
   "proxy": {
     "description": "proxy",
     "type": "string",
     "default": "",
-    "hint": "HTTP代理，格式可能是http://127.0.0.1:7890，填写后将应用于全部端点请求"
+    "hint": "HTTP代理，格式可能是http://127.0.0.1:7890，填写后将应用于全部端点请求。"
   }
 }
