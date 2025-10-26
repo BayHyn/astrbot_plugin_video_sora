@@ -87,16 +87,6 @@
     "default": "",
     "hint": "如上所述。如果是拼接，可能需要在结尾加斜杠（/）。"
   },
-  "send_video_method": {
-    "description": "发送视频方式",
-    "type": "string",
-    "options": [
-      "URL",
-      "文件"
-    ],
-    "default": "文件",
-    "hint": "选择URL可能导致发送视频的时候HTTP代理不起效果。选择文件可能由于AstrBot和协议端不在同一个文件系统导致协议端找不到文件。详见README.md 发送视频失败的解决方案 部分。"
-  },
   "save_video_enabled": {
     "description": "启用视频保存",
     "type": "bool",

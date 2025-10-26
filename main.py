@@ -46,7 +46,6 @@ class VideoSora(Star):
         self.task_limit = int(self.config.get("task_limit", 3))
         self.group_whitelist_enabled = self.config.get("group_whitelist_enabled")
         self.group_whitelist = self.config.get("group_whitelist")
-        self.send_video_method = self.config.get("send_video_method", "文件")
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
@@ -240,17 +239,19 @@ class VideoSora(Star):
             video_url = self.speed_down_url + video_url
         elif self.speed_down_url_type == "替换":
             video_url = re.sub(r"^(https?://[^/]+)", self.speed_down_url, video_url)
+        # 默认直接上报视频URL
         video_comp = Video.fromURL(video_url)
 
         # 下载视频到本地
-        if self.send_video_method == "文件" or self.save_video_enabled:
+        if self.proxy or self.save_video_enabled:
             video_path = os.path.join(self.video_data_dir, f"{task_id}.mp4")
             # 先检查本地文件是否有视频文件
             if not os.path.exists(video_path):
                 video_path, err_msg = await self.utils.download_video(
                     video_url, task_id
                 )
-            if self.send_video_method == "文件":
+            # 如果设置了正向代理，则上报本地文件路径
+            if self.proxy:
                 if err_msg:
                     return None, err_msg
                 video_comp = Video.fromFileSystem(video_path)
@@ -426,11 +427,11 @@ class VideoSora(Star):
                 )
                 return
 
-            # 发送处理后的视频
+            # 发送视频
             if video_comp:
                 yield event.chain_result([video_comp])
                 # 删除视频文件
-                if not self.save_video_enabled and self.send_video_method == "文件":
+                if not self.save_video_enabled and self.proxy:
                     self.utils.delete_video(task_id)
 
         finally:
@@ -499,7 +500,7 @@ class VideoSora(Star):
                 if video_comp:
                     yield event.chain_result([video_comp])
                     # 删除视频文件
-                    if not self.save_video_enabled and self.send_video_method == "文件":
+                    if not self.save_video_enabled and self.proxy:
                         self.utils.delete_video(task_id)
                     return
         # 再次尝试完成视频生成
@@ -546,7 +547,7 @@ class VideoSora(Star):
         if video_comp:
             yield event.chain_result([video_comp])
             # 删除视频文件
-            if not self.save_video_enabled and self.send_video_method == "文件":
+            if not self.save_video_enabled and self.proxy:
                 self.utils.delete_video(task_id)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
