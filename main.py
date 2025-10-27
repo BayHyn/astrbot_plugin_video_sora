@@ -29,6 +29,7 @@ class VideoSora(Star):
         self.speed_down_url_type = self.config.get("speed_down_url_type")
         self.speed_down_url = self.config.get("speed_down_url")
         self.save_video_enabled = self.config.get("save_video_enabled", False)
+        self.watermark_enabled = self.config.get("watermark_enabled", False)
         self.video_data_dir = os.path.join(
             StarTools.get_data_dir("astrbot_plugin_video_sora"), "videos"
         )
@@ -38,6 +39,7 @@ class VideoSora(Star):
             self.proxy,
             model_config,
             self.video_data_dir,
+            self.watermark_enabled,
         )
         self.auth_dict = dict.fromkeys(self.config.get("authorization_list", []), 0)
         self.screen_mode = self.config.get("screen_mode", "自动")
@@ -49,10 +51,6 @@ class VideoSora(Star):
 
     async def initialize(self):
         """可选择实现异步的插件初始化方法，当实例化该插件类之后会自动调用该方法。"""
-        # 检查配置是否已经关闭函数工具
-        if not self.config.get("llm_tool_enabled", False):
-            StarTools.unregister_llm_tool("sora_video_generation")
-            logger.info("已删除函数调用工具: sora_video_generation")
         # 创建视频缓存文件路径
         os.makedirs(self.video_data_dir, exist_ok=True)
         # 数据库文件路径
@@ -82,7 +80,12 @@ class VideoSora(Star):
         self.conn.commit()
 
     async def queue_task(
-        self, event: AstrMessageEvent, task_id: str, authorization: str, is_check=False
+        self,
+        event: AstrMessageEvent,
+        task_id: str,
+        authorization: str,
+        is_check=False,
+        is_force_check=False,
     ) -> tuple[str | None, str | None]:
         """完成视频生成并返回视频链接或者错误信息"""
 
@@ -106,7 +109,7 @@ class VideoSora(Star):
                         [
                             Comp.Reply(id=event.message_obj.message_id),
                             Comp.Plain(
-                                f"任务还在队列中，请稍后再看~\n状态：{status} 进度: {progress * 100:.2f}%"
+                                f"任务仍在队列中，请稍后再看~\n状态：{status} 进度: {progress * 100:.2f}%"
                             ),
                         ]
                     )
@@ -114,7 +117,9 @@ class VideoSora(Star):
             else:
                 logger.debug("队列状态完成，正在查询视频直链...")
 
-        self.polling_task.add(task_id)
+        # 记录正在处理的任务
+        if not is_force_check:
+            self.polling_task.add(task_id)
 
         # 等待视频生成
         result, err = await self.utils.poll_pending_video(task_id, authorization)
@@ -148,10 +153,8 @@ class VideoSora(Star):
                 video_url,
                 generation_id,
                 err,
-            ) = await self.utils.fetch_video_url(
-                task_id, authorization, 30 if is_check else 15
-            )
-            if video_url or status == "Failed":
+            ) = await self.utils.fetch_video_url(task_id, authorization)
+            if video_url or status == "Failed" or status == "EXCEPTION":
                 break
             await asyncio.sleep(INTERVAL)
             elapsed += INTERVAL
@@ -257,26 +260,9 @@ class VideoSora(Star):
                 video_comp = Video.fromFileSystem(video_path)
         return video_comp, None
 
-    @filter.llm_tool(name="sora_video_generation")
     @filter.command("sora", alias={"生成视频", "视频生成"})
-    async def video_sora(
-        self,
-        event: AstrMessageEvent,
-        llm_prompt: str = "",
-        llm_screen: str = "",
-    ):
-        """
-        A video generation tool, supporting both text-to-video and image-to-video functionalities.
-        If the user requests image-to-video generation, you must first verify that the user's
-        current message explicitly contains an actual image. References like 'this one' or 'the
-        above image' that point to an image in text form are not acceptable.
-
-        Args:
-            llm_prompt(string): The video generation prompt. Refine it strictly to
-                match the user's intent.
-            llm_screen(string): The screen orientation for the video. Must be one of
-                "landscape" or "portrait". You may choose a suitable orientation if the user does not specify.
-        """
+    async def video_sora(self, event: AstrMessageEvent):
+        """视频生成主函数"""
 
         # 检查群是否在白名单中
         if (
@@ -303,15 +289,13 @@ class VideoSora(Star):
 
         # 解析参数
         msg = re.match(
-            r"^(?:生成视频|视频生成|sora)(?:\s+(横屏|竖屏|landscape|portrait)?([\s\S]*))?$",
+            r"^(?:生成视频|视频生成|sora)(?:\s+(横屏|竖屏)?\s*([\s\S]*))?$",
             event.message_str,
         )
         # 提取提示词
         prompt = msg.group(2).strip() if msg and msg.group(2) else self.def_prompt
-        if llm_prompt:
-            prompt = llm_prompt
 
-        # 遍历消息链，获取第一张图片（Sora端点不支持多张图片的视频生成，至少测试的时候是这样）
+        # 遍历消息链，获取第一张图片（Sora网页端点不支持多张图片的视频生成，至少测试的时候是这样）
         image_url = ""
         for comp in event.get_messages():
             if isinstance(comp, Comp.Image):
@@ -339,9 +323,7 @@ class VideoSora(Star):
 
         # 竖屏还是横屏
         screen_mode = "portrait"
-        if llm_screen in ["landscape", "portrait"]:
-            screen_mode = llm_screen
-        elif msg and msg.group(1):
+        if msg and msg.group(1):
             params = msg.group(1).strip()
             screen_mode = "landscape" if params == "横屏" else "portrait"
         elif self.screen_mode in ["横屏", "竖屏"]:
@@ -430,7 +412,7 @@ class VideoSora(Star):
             # 发送视频
             if video_comp:
                 yield event.chain_result([video_comp])
-                # 删除视频文件
+                # 删除视频文件，如果没有开启保存视频功能，那么只有在开启self.proxy以后才有可能下载视频
                 if not self.save_video_enabled and self.proxy:
                     self.utils.delete_video(task_id)
 
@@ -521,7 +503,7 @@ class VideoSora(Star):
         # 交给queue_task处理，直到返回视频链接或者错误信息
         authorization = "Bearer " + auth_token
         video_url, msg = await self.queue_task(
-            event, task_id, authorization, is_check=True
+            event, task_id, authorization, is_check=True, is_force_check=is_force_check
         )
         if not video_url:
             yield event.chain_result(
@@ -586,8 +568,5 @@ class VideoSora(Star):
             self.conn.commit()
             self.cursor.close()
             self.conn.close()
-            if self.config.get("llm_tool_enabled", False):
-                StarTools.unregister_llm_tool("sora_video_generation")
-                logger.info("已删除函数调用工具: sora_video_generation")
         except Exception as e:
             logger.error(f"插件卸载时发生错误: {e}")

@@ -25,6 +25,7 @@ class Utils:
         proxy: str,
         model_config: dict,
         video_data_dir: str,
+        watermark_enabled: bool,
     ):
         self.sora_base_url = sora_base_url
         self.chatgpt_base_url = chatgpt_base_url
@@ -33,6 +34,7 @@ class Utils:
         self.model_config = model_config
         self.UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36 Edg/141.0.0.0"
         self.video_data_dir = video_data_dir
+        self.watermark_enabled = watermark_enabled
 
     def _handle_image(self, image_bytes: bytes) -> bytes:
         try:
@@ -73,7 +75,8 @@ class Utils:
             logger.error(f"下载图片失败: {e}")
             return None, "下载图片失败"
 
-    def get_image_orientation(self, image_bytes: bytes) -> str:
+    @staticmethod
+    def get_image_orientation(image_bytes: bytes) -> str:
         # 把 bytes 转成图片对象
         img = Image.open(BytesIO(image_bytes))
 
@@ -280,19 +283,19 @@ class Utils:
         )
 
     async def fetch_video_url(
-        self, task_id: str, authorization: str, limit: int = 15
+        self, task_id: str, authorization: str
     ) -> tuple[str, str | None, str | None, str | None]:
         try:
             response = await self.session.get(
-                self.sora_base_url + f"/backend/project_y/profile/drafts?limit={limit}",
+                self.sora_base_url + "/backend/video_gen",
                 headers={"Authorization": authorization},
             )
-            result = response.json()
             if response.status_code == 200:
-                for item in result.get("items", []):
-                    if item.get("task_id") == task_id:
-                        downloadable_url = item.get("downloadable_url")
-                        if not downloadable_url:
+                result = response.json()
+                for item in result.get("task_responses", []):
+                    if item.get("id") == task_id:
+                        video_url = item.get("generations", [])[0].get("encodings", {}).get("source_wm" if self.watermark_enabled else "source", {}).get("path")
+                        if not video_url:
                             err_str = (
                                 item.get("reason_str")
                                 or item.get("error_reason")
@@ -307,9 +310,10 @@ class Utils:
                                 item.get("id"),
                                 err_str,
                             )
-                        return "Done", downloadable_url, item.get("id"), None
+                        return "Done", video_url, item.get("generations", [])[0].get("id"), None
                 return "NotFound", None, None, "未找到对应的视频"
             else:
+                result = response.json()
                 err_str = f"获取视频链接失败: {result.get('error', {}).get('message')}"
                 logger.error(err_str)
                 return "Failed", None, None, err_str
