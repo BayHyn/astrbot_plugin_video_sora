@@ -85,7 +85,6 @@ class VideoSora(Star):
         task_id: str,
         authorization: str,
         is_check=False,
-        is_force_check=False,
     ) -> tuple[str | None, str | None]:
         """完成视频生成并返回视频链接或者错误信息"""
 
@@ -118,68 +117,81 @@ class VideoSora(Star):
                 logger.debug("队列状态完成，正在查询视频直链...")
 
         # 记录正在处理的任务
-        if not is_force_check:
+        try:
             self.polling_task.add(task_id)
 
-        # 等待视频生成
-        result, err = await self.utils.poll_pending_video(task_id, authorization)
+            # 等待视频生成
+            result, err = await self.utils.poll_pending_video(task_id, authorization)
 
-        # 更新任务进度
-        self.cursor.execute(
-            """
-            UPDATE video_data SET status = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
-        """,
-            (
-                result,
-                err,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                task_id,
-            ),
-        )
-        self.conn.commit()
+            # 更新任务进度
+            self.cursor.execute(
+                """
+                UPDATE video_data SET status = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
+            """,
+                (
+                    result,
+                    err,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    task_id,
+                ),
+            )
+            self.conn.commit()
 
-        if result != "Done" or err:
-            return None, err
+            if result != "Done" or err:
+                return None, err
 
-        elapsed = 0
-        status = "Done"
-        video_url = ""
-        generation_id = None
-        err = None
-        # 获取视频下载地址
-        while elapsed < MAX_WAIT:
-            (
-                status,
-                video_url,
-                generation_id,
-                err,
-            ) = await self.utils.fetch_video_url(task_id, authorization)
-            if video_url or status == "Failed" or status == "EXCEPTION":
-                break
-            await asyncio.sleep(INTERVAL)
-            elapsed += INTERVAL
+            elapsed = 0
+            status = "Done"
+            video_url = ""
+            generation_id = None
+            err = None
+            # 获取视频下载地址
+            while elapsed < MAX_WAIT:
+                (
+                    status,
+                    video_url,
+                    generation_id,
+                    err,
+                ) = await self.utils.fetch_video_url(task_id, authorization)
+                if video_url or status == "EXCEPTION":
+                    break
+                if status == "Failed":
+                    # 降级查询，尝试通过web端点获取视频链接或者失败原因
+                    (
+                        status,
+                        video_url,
+                        generation_id,
+                        err,
+                    ) = await self.utils.get_video_by_web(task_id, authorization)
+                    if video_url or status in {"Failed", "EXCEPTION"}:
+                        break
+                await asyncio.sleep(INTERVAL)
+                elapsed += INTERVAL
 
-        # 更新任务进度
-        self.cursor.execute(
-            """
-            UPDATE video_data SET status = ?, video_url = ?, generation_id = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
-        """,
-            (
-                status,
-                video_url,
-                generation_id,
-                err,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                task_id,
-            ),
-        )
-        self.conn.commit()
+            # 更新任务进度
+            self.cursor.execute(
+                """
+                UPDATE video_data SET status = ?, video_url = ?, generation_id = ?, error_msg = ?, updated_at = ? WHERE task_id = ?
+            """,
+                (
+                    status,
+                    video_url,
+                    generation_id,
+                    err,
+                    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    task_id,
+                ),
+            )
+            self.conn.commit()
 
-        # 把错误信息返回给调用者
-        if not video_url or err:
-            return None, err or "生成视频超时"
+            # 把错误信息返回给调用者
+            if not video_url or err:
+                return None, err or "生成视频超时"
 
-        return video_url, None
+            return video_url, None
+        finally:
+            if is_check:
+                self.polling_task.remove(task_id)
 
     async def create_video(
         self,
@@ -262,7 +274,7 @@ class VideoSora(Star):
 
     @filter.command("sora", alias={"生成视频", "视频生成"})
     async def video_sora(self, event: AstrMessageEvent):
-        """视频生成主函数"""
+        """生成视频"""
 
         # 检查群是否在白名单中
         if (
@@ -503,7 +515,7 @@ class VideoSora(Star):
         # 交给queue_task处理，直到返回视频链接或者错误信息
         authorization = "Bearer " + auth_token
         video_url, msg = await self.queue_task(
-            event, task_id, authorization, is_check=True, is_force_check=is_force_check
+            event, task_id, authorization, is_check=True
         )
         if not video_url:
             yield event.chain_result(

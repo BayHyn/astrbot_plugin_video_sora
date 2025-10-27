@@ -282,20 +282,20 @@ class Utils:
             f"视频状态查询超时，ID: {task_id}，生成进度: {progress * 100:.2f}%",
         )
 
-    async def fetch_video_url(
+    async def get_video_by_web(
         self, task_id: str, authorization: str
     ) -> tuple[str, str | None, str | None, str | None]:
         try:
             response = await self.session.get(
-                self.sora_base_url + "/backend/video_gen",
+                self.sora_base_url + "/backend/project_y/profile/drafts?limit=15",
                 headers={"Authorization": authorization},
             )
             if response.status_code == 200:
                 result = response.json()
-                for item in result.get("task_responses", []):
-                    if item.get("id") == task_id:
-                        video_url = item.get("generations", [])[0].get("encodings", {}).get("source_wm" if self.watermark_enabled else "source", {}).get("path")
-                        if not video_url:
+                for item in result.get("items", []):
+                    if item.get("task_id") == task_id:
+                        downloadable_url = item.get("downloadable_url")
+                        if not downloadable_url:
                             err_str = (
                                 item.get("reason_str")
                                 or item.get("error_reason")
@@ -310,13 +310,64 @@ class Utils:
                                 item.get("id"),
                                 err_str,
                             )
-                        return "Done", video_url, item.get("generations", [])[0].get("id"), None
+                        return "Done", downloadable_url, item.get("id"), None
                 return "NotFound", None, None, "未找到对应的视频"
             else:
                 result = response.json()
                 err_str = f"获取视频链接失败: {result.get('error', {}).get('message')}"
                 logger.error(err_str)
-                return "Failed", None, None, err_str
+                return "ServerError", None, None, err_str
+        except Timeout as e:
+            logger.error(f"网络请求超时: {e}")
+            return (
+                "Timeout",
+                None,
+                None,
+                "获取视频链接失败：网络请求超时，请检查网络连通性",
+            )
+        except Exception as e:
+            logger.error(f"获取视频链接失败: {e}")
+            return "EXCEPTION", None, None, "获取视频链接失败"
+
+    async def fetch_video_url(
+        self, task_id: str, authorization: str
+    ) -> tuple[str, str | None, str | None, str | None]:
+        try:
+            response = await self.session.get(
+                self.sora_base_url + "/backend/video_gen",
+                headers={"Authorization": authorization},
+            )
+            if response.status_code == 200:
+                result = response.json()
+                for item in result.get("task_responses", []):
+                    if item.get("id") == task_id:
+                        if not item.get("generations"):
+                            return (
+                                "Failed",
+                                None,
+                                None,
+                                item.get("failure_reason"),
+                            )
+                        video_url = (
+                            item.get("generations", [])[0]
+                            .get("encodings", {})
+                            .get(
+                                "source_wm" if self.watermark_enabled else "source", {}
+                            )
+                            .get("path")
+                        )
+                        return (
+                            "Done",
+                            video_url,
+                            item.get("generations", [])[0].get("id"),
+                            None,
+                        )
+                return "NotFound", None, None, "未找到对应的视频"
+            else:
+                result = response.json()
+                err_str = f"获取视频链接失败: {result.get('error', {}).get('message')}"
+                logger.error(err_str)
+                return "ServerError", None, None, err_str
         except Timeout as e:
             logger.error(f"网络请求超时: {e}")
             return (
