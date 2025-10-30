@@ -58,7 +58,7 @@
 提供一个实验性的 Zako\~♡Zako\~♡ 反向代理，目前属于单节点单 IP 部署，暂不明确是否存在 429 等防刷机制。坏了可能来不及修复，请谨慎使用。  
 使用方法：
 
-- 将三个 URL 输入框（sora_base_url、chatgpt_base_url、speed_down_url）的内容全部改成 https://sora.zakozako.de
+- 将三个 URL 输入框（sora_base_url、chatgpt_base_url、speed_down_url）的内容全部改成 `https://sora.zakozako.de`
 - speed_down_url_type 选项选择 <b>替换</b> 即可。
 
 这个反向代理设置了较严格的访问频率限制和带宽控制，对于几个账号的日常使用应该已经足够了。如果你有更高的使用需求，相信你一定有自行解决网络问题的能力。
@@ -82,8 +82,8 @@
 > 本插件的调度策略是：如果设置了正向代理，则以文件路径的形式上报给协议端（若发送视频失败见 2、3），否则以视频 URL 的形式上报（若发送失视频失败见 1）。
 
 1. 在 speed_down_url 中填写反向代理，协议端直接通过这个反向代理下载视频，可以不依赖于 AstrBot 的回调接口和挂载映射路径。
-2. 在 AstrBot 面板-配置文件-系统-对外可达的回调接口地址 配置回调接口，至少要求 <b>协议端</b> 能够访问这个回调接口。可以是容器网络的容器名称等，例如 `http://astrbot:6185`，前提是 AstrBot 和协议端容器在同一个容器网络。也可以直接用 `http://ip:port`（不建议）或者配置个 `https://example`，只要协议端能访问到就行。
-3. 将 AstrBot 数据目录映射到协议端 Docker 容器中，以便于文件复制。
+2. 在 AstrBot 面板-配置文件-系统-对外可达的回调接口地址 配置回调接口，至少要求 <b>协议端</b> 能够访问这个回调接口。可以是容器网络的容器名称等，例如 `http://astrbot:6185`，前提是 AstrBot 和协议端容器在同一个容器网络内。也可以直接用 `http://ip:port`（不建议）、`http://host.docker.internal:6185`，也可以配置个 `https://example.com`，只要协议端能访问到就行。如果在 Astrbot 和协议端在同一台宿主机内，可以填写 `http://localhost:6185`、`http://127.0.0.1:6185`，用于解决方案 3 的文件权限问题。
+3. 将 AstrBot 数据目录映射到协议端 Docker 容器中，以便于文件复制。如果复制文件出现权限问题，请改用解决方案 2。
 
 - 参考示例：`-v ~/AstrBot/data:/AstrBot/data` 按照实际环境修改。
 

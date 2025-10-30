@@ -318,7 +318,6 @@ class VideoSora(Star):
                     if isinstance(quote, Comp.Image):
                         image_url = quote.url
                         break
-                break
 
         # 下载图片
         image_bytes = None

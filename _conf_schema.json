@@ -106,9 +106,9 @@
     "hint": "白名单群组sid列表，可在对应群内使用/sid获取。"
   },
   "proxy": {
-    "description": "proxy",
+    "description": "Proxy",
     "type": "string",
     "default": "",
-    "hint": "HTTP代理，格式可能是http://127.0.0.1:7890，填写后将应用于全部端点请求。"
+    "hint": "HTTP正向代理，格式可能是http://127.0.0.1:7890，填写后将应用于全部端点请求。如果同时填写正向代理和反向代理，可能会导致代理两次的情况。"
   }
 }
